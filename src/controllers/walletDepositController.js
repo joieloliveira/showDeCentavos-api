@@ -114,3 +114,45 @@ export const getWalletDeposit = async (req, res) => {
     return res.status(500).json({ message: "Erro ao consultar depósito." });
   }
 };
+
+/**
+ * Reconciliação sob demanda para cobrança PIX já identificada.
+ * Nunca aceita identificador de pagamento informado pelo cliente.
+ */
+export const reconcileWalletPixDeposit = async (req, res) => {
+  if (!mongoose.isObjectIdOrHexString(req.params.depositId)) {
+    return res.status(400).json({ message: "ID inválido." });
+  }
+
+  try {
+    const deposit = await WalletDeposit.findOne({
+      _id: req.params.depositId,
+      user: req.user.id,
+      provider: "mercadopago",
+    });
+    if (!deposit) {
+      return res.status(404).json({ message: "Depósito não encontrado." });
+    }
+
+    if (deposit.status === "pending" && deposit.providerOrderId) {
+      await processApprovedMercadoPagoWalletDeposit({
+        depositId: String(deposit._id),
+        providerOrderId: deposit.providerOrderId,
+      });
+    }
+
+    const updated = await WalletDeposit.findOne({
+      _id: deposit._id,
+      user: req.user.id,
+    });
+    return res.json({
+      deposit: publicDeposit(updated),
+      reconciliationPending: updated.status === "pending" && !updated.providerOrderId,
+    });
+  } catch (error) {
+    console.error("Erro na reconciliação da recarga PIX:", error.message);
+    return res.status(503).json({
+      message: "Não foi possível confirmar o pagamento agora. Tente novamente mais tarde.",
+    });
+  }
+};
