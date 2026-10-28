@@ -59,6 +59,11 @@ export const verifyWalletDepositPayment = async ({
     throw new Error("Valor pago diverge do valor do depósito.");
   }
 
+  // A carteira aceita recargas somente via PIX, não outros meios de pagamento.
+  if (providerOrder.payment?.method !== "pix") {
+    throw new Error("Método de pagamento incompatível com recarga PIX.");
+  }
+
   const providerPaymentId = providerOrder.payment?.id;
   if (!providerPaymentId) {
     throw new Error("Pagamento aprovado sem identificador de transação.");
