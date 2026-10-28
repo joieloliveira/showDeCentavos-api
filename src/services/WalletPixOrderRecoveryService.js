@@ -9,7 +9,7 @@ export const recoverWalletPixOrder = async (deposit) => {
   if (!deposit || deposit.provider !== "mercadopago") {
     throw new Error("Depósito inválido para recuperação.");
   }
-  if (deposit.providerOrderId) return deposit.providerOrderId;
+  if (deposit.providerOrderId) return { recovered: true, providerOrderId: deposit.providerOrderId };
 
   const start = new Date(deposit.createdAt);
   if (Number.isNaN(start.getTime())) throw new Error("Data do depósito inválida.");
