@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 
 import Order from "../../models/Order.js";
+import Product from "../../models/Product.js";
+import WalletDeposit from "../../models/WalletDeposit.js";
 
 import {
   WebhookSignatureValidator,
@@ -10,6 +12,7 @@ import {
 import MercadoPagoProvider from "../../services/payments/MercadoPagoProvider.js";
 
 import { processApprovedOrder } from "../../services/OrderPaymentService.js";
+import { processApprovedMercadoPagoWalletDeposit } from "../../services/MercadoPagoWalletDepositService.js";
 
 const paymentProvider = MercadoPagoProvider;
 
@@ -159,6 +162,28 @@ export const mercadoPagoOrderWebhook = async (
       );
 
       return res.sendStatus(200);
+    }
+
+    // O mesmo webhook configurado no Mercado Pago atende pedidos e recargas.
+    // Uma recarga só é creditada após verificação independente no provedor.
+    if (mongoose.isObjectIdOrHexString(internalOrderId)) {
+      const walletDeposit = await WalletDeposit.findOne({
+        _id: internalOrderId,
+        provider: "mercadopago",
+        $or: [
+          { providerOrderId: String(providerOrder.orderId) },
+          { providerOrderId: null },
+        ],
+      });
+      if (walletDeposit) {
+        if (providerOrder.normalizedStatus === "approved") {
+          await processApprovedMercadoPagoWalletDeposit({
+            depositId: String(walletDeposit._id),
+            providerOrderId: String(providerOrder.orderId),
+          });
+        }
+        return res.sendStatus(200);
+      }
     }
 
     const currentOrder =
