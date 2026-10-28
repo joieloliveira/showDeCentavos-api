@@ -64,6 +64,24 @@ export const verifyWalletDepositPayment = async ({
     throw new Error("Método de pagamento incompatível com recarga PIX.");
   }
 
+  // Não aceitar uma ordem com múltiplas transações ou valor individual divergente.
+  const payments = providerOrder.raw?.transactions?.payments;
+  if (!Array.isArray(payments) || payments.length !== 1) {
+    throw new Error("Recarga PIX exige exatamente uma transação.");
+  }
+
+  const paymentAmount = String(payments[0]?.amount ?? "");
+  const paymentAmountMatch = /^(\d+)(?:\.(\d{1,2}))?$/.exec(paymentAmount);
+  if (!paymentAmountMatch) {
+    throw new Error("Valor da transação PIX inválido.");
+  }
+  const paymentAmountCents =
+    Number(paymentAmountMatch[1]) * 100 +
+    Number((paymentAmountMatch[2] ?? "").padEnd(2, "0"));
+  if (!Number.isSafeInteger(paymentAmountCents) || paymentAmountCents !== deposit.amountCents) {
+    throw new Error("Valor da transação PIX não corresponde ao depósito.");
+  }
+
   const providerPaymentId = providerOrder.payment?.id;
   if (!providerPaymentId) {
     throw new Error("Pagamento aprovado sem identificador de transação.");
