@@ -72,12 +72,22 @@ export const createWalletPixDeposit = async (req, res) => {
       }
     );
 
-    // A cobrança pode ter sido aprovada antes do retorno da API.
+    // Confirma também cobranças aprovadas antes do retorno da API.
+    // A verificação consulta novamente o provedor e não confia no status da resposta inicial.
     if (charge.status === "processed") {
-      await processApprovedMercadoPagoWalletDeposit({
-        depositId: String(deposit._id),
-        providerOrderId: charge.providerOrderId,
-      });
+      try {
+        await processApprovedMercadoPagoWalletDeposit({
+          depositId: String(deposit._id),
+          providerOrderId: charge.providerOrderId,
+        });
+      } catch (error) {
+        console.error("Recarga criada, mas confirmação pendente:", error.message);
+        return res.status(202).json({
+          depositId: deposit._id,
+          status: "confirmation_pending",
+          message: "Cobrança criada. A confirmação do crédito está pendente.",
+        });
+      }
     }
 
     const updated = await WalletDeposit.findById(deposit._id);
