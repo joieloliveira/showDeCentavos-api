@@ -57,13 +57,32 @@ export const recoverWalletPixOrder = async (deposit) => {
     throw new Error("Valor da cobrança recuperada não corresponde ao depósito.");
   }
 
+  // Restaura os dados necessários para o usuário pagar o PIX recuperado.
+  // Não sobrescreve identificadores de pagamento já gravados por webhook.
+  const paymentId = confirmed.payment?.id ?? null;
+  const fields = {
+    providerOrderId,
+    chargeStatus: "resolved",
+    pix: {
+      qrCode: confirmed.pix?.qrCode ?? null,
+      qrCodeBase64: confirmed.pix?.qrCodeBase64 ?? null,
+      ticketUrl: confirmed.pix?.ticketUrl ?? null,
+    },
+  };
+  if (paymentId) fields.providerPaymentId = paymentId;
+
   const updated = await WalletDeposit.findOneAndUpdate(
     {
       _id: deposit._id,
       provider: "mercadopago",
-      $or: [{ providerOrderId: null }, { providerOrderId }],
+      $and: [
+        { $or: [{ providerOrderId: null }, { providerOrderId }] },
+        ...(paymentId
+          ? [{ $or: [{ providerPaymentId: null }, { providerPaymentId: paymentId }] }]
+          : []),
+      ],
     },
-    { $set: { providerOrderId, chargeStatus: "resolved" } },
+    { $set: fields },
     { returnDocument: "after" }
   );
   if (!updated) throw new Error("Depósito já vinculado a outra cobrança.");
