@@ -176,6 +176,28 @@ export const mercadoPagoOrderWebhook = async (
         ],
       });
       if (walletDeposit) {
+        // Mesmo que o pagamento ainda esteja pendente, guardamos o ID da
+        // cobrança recebida no webhook. Isso permite reconciliação posterior
+        // quando a resposta original da criação do PIX sofreu timeout.
+        const orderId = String(providerOrder.orderId);
+        const linkedDeposit = await WalletDeposit.findOneAndUpdate(
+          {
+            _id: walletDeposit._id,
+            provider: "mercadopago",
+            $or: [{ providerOrderId: null }, { providerOrderId: orderId }],
+          },
+          {
+            $set: {
+              providerOrderId: orderId,
+              chargeStatus: "resolved",
+            },
+          },
+          { returnDocument: "after" }
+        );
+        if (!linkedDeposit) {
+          console.error("Recarga vinculada a outra cobrança:", walletDeposit._id);
+          return res.sendStatus(500);
+        }
         if (providerOrder.normalizedStatus === "approved") {
           await processApprovedMercadoPagoWalletDeposit({
             depositId: String(walletDeposit._id),
