@@ -6,6 +6,7 @@ import {
   generateWalletPixIdempotencyKey,
 } from "../services/WalletPixChargeService.js";
 import { processApprovedMercadoPagoWalletDeposit } from "../services/MercadoPagoWalletDepositService.js";
+import { recoverWalletPixOrder } from "../services/WalletPixOrderRecoveryService.js";
 
 const publicDeposit = (deposit) => ({
   id: deposit._id,
@@ -150,11 +151,19 @@ export const reconcileWalletPixDeposit = async (req, res) => {
       return res.status(404).json({ message: "Depósito não encontrado." });
     }
 
-    if (deposit.status === "pending" && deposit.providerOrderId) {
-      await processApprovedMercadoPagoWalletDeposit({
-        depositId: String(deposit._id),
-        providerOrderId: deposit.providerOrderId,
-      });
+    let recovery = null;
+    if (deposit.status === "pending") {
+      let providerOrderId = deposit.providerOrderId;
+      if (!providerOrderId) {
+        recovery = await recoverWalletPixOrder(deposit);
+        providerOrderId = recovery.providerOrderId ?? null;
+      }
+      if (providerOrderId) {
+        await processApprovedMercadoPagoWalletDeposit({
+          depositId: String(deposit._id),
+          providerOrderId,
+        });
+      }
     }
 
     const updated = await WalletDeposit.findOne({
@@ -164,6 +173,7 @@ export const reconcileWalletPixDeposit = async (req, res) => {
     return res.json({
       deposit: publicDeposit(updated),
       reconciliationPending: updated.status === "pending" && !updated.providerOrderId,
+      recoveryReason: recovery?.recovered === false ? recovery.reason : null,
     });
   } catch (error) {
     console.error("Erro na reconciliação da recarga PIX:", error.message);
