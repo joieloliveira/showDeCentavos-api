@@ -1,5 +1,6 @@
 import WalletDeposit from "../models/WalletDeposit.js";
 import MercadoPagoProvider from "./payments/MercadoPagoProvider.js";
+import { selectWalletPixOrderCandidate } from "./WalletPixOrderSearchSelection.js";
 
 /**
  * Busca apenas cobranças já existentes. Nunca emite novo PIX.
@@ -21,33 +22,9 @@ export const recoverWalletPixOrder = async (deposit) => {
     endDate,
   });
 
-  // A estrutura da resposta deve ser validada em integração antes de ativar
-  // formatos adicionais. Não escolhemos uma cobrança arbitrariamente.
-  const orders = Array.isArray(response)
-    ? response
-    : Array.isArray(response?.results)
-      ? response.results
-      : null;
-  if (!orders) return { recovered: false, reason: "UNRECOGNIZED_SEARCH_RESPONSE" };
-
-  // Nunca concluir unicidade com uma página incompleta de resultados.
-  const paging = response?.paging ?? response?.pagination ?? null;
-  const total = paging?.total ?? response?.total ?? null;
-  if (total !== null && (!Number.isSafeInteger(Number(total)) || Number(total) > orders.length)) {
-    return { recovered: false, reason: "INCOMPLETE_SEARCH_RESULTS" };
-  }
-
-  const matching = orders.filter(
-    (order) => String(order?.external_reference ?? "") === String(deposit._id)
-  );
-  if (matching.length !== 1 || !matching[0]?.id) {
-    return {
-      recovered: false,
-      reason: matching.length > 1 ? "AMBIGUOUS_ORDERS" : "ORDER_NOT_FOUND",
-    };
-  }
-
-  const providerOrderId = String(matching[0].id);
+  const selection = selectWalletPixOrderCandidate(response, String(deposit._id));
+  if (!selection.recovered) return selection;
+  const providerOrderId = selection.providerOrderId;
   const confirmed = await MercadoPagoProvider.getOrder(providerOrderId);
   if (
     confirmed.orderId !== providerOrderId ||
