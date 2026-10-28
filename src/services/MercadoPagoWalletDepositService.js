@@ -44,6 +44,9 @@ export const processApprovedMercadoPagoWalletDeposit = async ({
 
   try {
     await session.withTransaction(async () => {
+      // O driver pode executar este callback novamente após um conflito.
+      // Não reutilizar resultado de uma tentativa anterior abortada.
+      result = { processed: false, reason: "ALREADY_PROCESSED" };
       // Revalida o estado do depósito sob transação, inclusive o pagamento.
       const claimed = await WalletDeposit.findOneAndUpdate(
         {
