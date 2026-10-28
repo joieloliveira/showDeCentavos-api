@@ -1,0 +1,42 @@
+
+import { Router } from "express";
+
+import auth from "../middlewares/auth.js";
+
+import {
+  getBidByIdempotencyKey,
+  placeBid,
+} from "../controllers/bidController.js";
+
+
+import {
+  createAuction,
+  listAuctions,
+  getAuctionById,
+  startAuctionWaiting,
+} from "../controllers/auctionController.js";
+
+const router = Router();
+
+// Listagem pública de leilões
+router.get("/", listAuctions);
+
+router.get(
+  "/bids/by-key/:idempotencyKey",
+  auth,
+  getBidByIdempotencyKey
+);
+
+router.post("/:id/bids", auth, placeBid);
+
+
+// Consultar um leilão pelo ID
+router.get("/:id", getAuctionById);
+
+// Cadastro de leilões — somente administrador
+router.post("/", auth, createAuction);
+
+// Iniciar contagem de espera — somente administrador
+router.post("/:id/start-waiting", auth, startAuctionWaiting);
+
+export default router;

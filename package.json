@@ -1,0 +1,36 @@
+{
+  "name": "marketplace-miniaturas-3d",
+  "version": "1.0.0",
+  "description": "API do marketplace de miniaturas 3D",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js"
+  },
+  "keywords": [],
+  "author": "Joiel Oliveira",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1112.0",
+    "axios": "^1.19.0",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "cpf-cnpj-validator": "^2.1.2",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "google-auth-library": "^11.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "mercadopago": "^3.3.0",
+    "mongoose": "^9.9.2",
+    "mongoose-paginate-v2": "^1.9.5",
+    "multer": "^2.2.0",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^9.0.5",
+    "uuid": "^14.0.1",
+    "yup": "^1.7.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
