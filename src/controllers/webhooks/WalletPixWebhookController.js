@@ -36,6 +36,18 @@ export const walletPixWebhook = async (req, res) => {
     });
     if (!deposit) return res.sendStatus(200);
 
+    // Recupera o vínculo mesmo quando a resposta original da API se perdeu.
+    const linkedDeposit = await WalletDeposit.findOneAndUpdate(
+      {
+        _id: deposit._id,
+        provider: "mercadopago",
+        $or: [{ providerOrderId: null }, { providerOrderId: orderId }],
+      },
+      { $set: { providerOrderId: orderId, chargeStatus: "resolved" } },
+      { returnDocument: "after" }
+    );
+    if (!linkedDeposit) return res.sendStatus(500);
+
     if (providerOrder.normalizedStatus === "approved") {
       await processApprovedMercadoPagoWalletDeposit({
         depositId: String(deposit._id),
