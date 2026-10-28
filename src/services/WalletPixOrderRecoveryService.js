@@ -30,6 +30,13 @@ export const recoverWalletPixOrder = async (deposit) => {
       : null;
   if (!orders) return { recovered: false, reason: "UNRECOGNIZED_SEARCH_RESPONSE" };
 
+  // Nunca concluir unicidade com uma página incompleta de resultados.
+  const paging = response?.paging ?? response?.pagination ?? null;
+  const total = paging?.total ?? response?.total ?? null;
+  if (total !== null && (!Number.isSafeInteger(Number(total)) || Number(total) > orders.length)) {
+    return { recovered: false, reason: "INCOMPLETE_SEARCH_RESULTS" };
+  }
+
   const matching = orders.filter(
     (order) => String(order?.external_reference ?? "") === String(deposit._id)
   );
