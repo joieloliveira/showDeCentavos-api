@@ -30,6 +30,7 @@ export const verifyWalletDepositPayment = async ({
   const providerOrder = await MercadoPagoProvider.getOrder(providerOrderId);
 
   if (
+    (deposit.providerOrderId && deposit.providerOrderId !== providerOrderId) ||
     providerOrder.orderId !== providerOrderId ||
     providerOrder.externalReference !== String(deposit._id)
   ) {
