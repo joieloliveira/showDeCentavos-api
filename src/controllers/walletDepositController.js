@@ -60,17 +60,33 @@ export const createWalletPixDeposit = async (req, res) => {
       });
     }
 
-    await WalletDeposit.updateOne(
-      { _id: deposit._id, provider: "mercadopago" },
+    // Um webhook pode aprovar o depósito enquanto a criação do PIX retorna.
+    // Não sobrescrevemos um pagamento já vinculado pelo webhook.
+    const chargeFields = {
+      providerOrderId: charge.providerOrderId,
+      chargeStatus: "resolved",
+      pix: charge.pix,
+    };
+    if (charge.providerPaymentId) {
+      chargeFields.providerPaymentId = charge.providerPaymentId;
+    }
+    const saved = await WalletDeposit.findOneAndUpdate(
       {
-        $set: {
-          providerOrderId: charge.providerOrderId,
-          providerPaymentId: charge.providerPaymentId,
-          chargeStatus: "resolved",
-          pix: charge.pix,
-        },
-      }
+        _id: deposit._id,
+        provider: "mercadopago",
+        $and: [
+          { $or: [{ providerOrderId: null }, { providerOrderId: charge.providerOrderId }] },
+          ...(charge.providerPaymentId
+            ? [{ $or: [{ providerPaymentId: null }, { providerPaymentId: charge.providerPaymentId }] }]
+            : []),
+        ],
+      },
+      { $set: chargeFields },
+      { returnDocument: "after" }
     );
+    if (!saved) {
+      throw new Error("Cobrança diverge do depósito registrado.");
+    }
 
     // Confirma também cobranças aprovadas antes do retorno da API.
     // A verificação consulta novamente o provedor e não confia no status da resposta inicial.
