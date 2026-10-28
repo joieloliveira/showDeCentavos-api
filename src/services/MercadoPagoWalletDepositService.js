@@ -52,9 +52,9 @@ export const processApprovedMercadoPagoWalletDeposit = async ({
           status: "pending",
           processedAt: null,
           amountCents: verified.amountCents,
-          $or: [
-            { providerPaymentId: null },
-            { providerPaymentId: verified.providerPaymentId },
+          $and: [
+            { $or: [{ providerOrderId: verified.providerOrderId }, { providerOrderId: null }] },
+            { $or: [{ providerPaymentId: null }, { providerPaymentId: verified.providerPaymentId }] },
           ],
         },
         {
@@ -62,6 +62,7 @@ export const processApprovedMercadoPagoWalletDeposit = async ({
             status: "approved",
             processedAt: new Date(),
             providerPaymentId: verified.providerPaymentId,
+            providerOrderId: verified.providerOrderId,
           },
         },
         { session, returnDocument: "after" }
