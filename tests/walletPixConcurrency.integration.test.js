@@ -15,7 +15,20 @@ const enabled = Boolean(uri && /^wallet_test_[a-z0-9_-]+$/i.test(databaseName));
 
 test("concurrent PIX confirmations credit a deposit exactly once", { skip: !enabled && "Set WALLET_TEST_MONGODB_URI to a disposable wallet_test_* database" }, async (t) => {
   await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
-  t.after(async () => { mock.restoreAll(); await mongoose.disconnect(); });
+  t.after(async () => {
+    mock.restoreAll();
+    try {
+      if (depositIdForCleanup) {
+        await WalletTransaction.deleteMany({ deposit: depositIdForCleanup });
+        await WalletDeposit.deleteOne({ _id: depositIdForCleanup });
+      }
+      if (userIdForCleanup) await User.deleteOne({ _id: userIdForCleanup });
+    } finally {
+      await mongoose.disconnect();
+    }
+  });
+  let depositIdForCleanup = null;
+  let userIdForCleanup = null;
 
   // Transactions require a MongoDB replica set; ensure indexes are in place.
   await Promise.all([User.init(), WalletDeposit.init(), WalletTransaction.init()]);
@@ -29,16 +42,13 @@ test("concurrent PIX confirmations credit a deposit exactly once", { skip: !enab
     isActive: true,
     wallet: { balanceCents: 1000 },
   });
+  userIdForCleanup = user._id;
   const deposit = await WalletDeposit.create({
     user: user._id, amountCents, provider: "mercadopago",
     status: "pending", providerOrderId,
   });
 
-  t.after(async () => {
-    await WalletTransaction.deleteMany({ deposit: deposit._id });
-    await WalletDeposit.deleteOne({ _id: deposit._id });
-    await User.deleteOne({ _id: user._id });
-  });
+  depositIdForCleanup = deposit._id;
 
   mock.method(MercadoPagoProvider, "getOrder", async () => ({
     orderId: providerOrderId,
