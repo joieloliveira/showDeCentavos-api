@@ -43,7 +43,7 @@ export const verifyWalletDepositPayment = async ({
   // O Mercado Pago devolve total_amount como string decimal.
   // Convertê-lo a centavos evita comparação de valores float.
   const totalAmount = providerOrder.raw?.total_amount;
-  const match = /^(\\d+)(?:\\.(\\d{1,2}))?$/.exec(String(totalAmount ?? ""));
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(totalAmount ?? ""));
   if (!match) {
     throw new Error("Valor da cobrança ausente ou inválido.");
   }
