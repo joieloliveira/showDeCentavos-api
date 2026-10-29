@@ -19,6 +19,13 @@ const publicDeposit = (deposit) => ({
 });
 
 export const createWalletPixDeposit = async (req, res) => {
+  // Fail closed: never call the payment provider unless explicitly enabled.
+  // The frontend's disabled button is not a security boundary.
+  if (process.env.WALLET_PIX_CHARGES_ENABLED !== "true") {
+    return res.status(503).json({
+      message: "Recargas PIX ainda não estão habilitadas.",
+    });
+  }
   try {
     const { amountCents } = req.body ?? {};
     if (!Number.isSafeInteger(amountCents) || amountCents < 100 || amountCents > 100000) {
