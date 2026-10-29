@@ -2,7 +2,7 @@ import { Router } from "express";
 
 import auth from "../middlewares/auth.js";
 import isAdmin from "../middlewares/isAdmin.js";
-import { listAdminWalletIncidents } from "../controllers/adminWalletIncidentController.js";
+import { listAdminWalletIncidents, getAdminWalletIncident } from "../controllers/adminWalletIncidentController.js";
 
 import {
   reconcileStockReservations,
@@ -13,6 +13,7 @@ import {
 const router = Router();
 
 router.get("/wallet/incidents", auth, isAdmin, listAdminWalletIncidents);
+router.get("/wallet/incidents/:incidentId", auth, isAdmin, getAdminWalletIncident);
 
 router.get(
   "/dashboard",
