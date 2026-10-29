@@ -11,7 +11,7 @@ const uri = process.env.WALLET_TEST_MONGODB_URI;
 const databaseName = uri ? new URL(uri).pathname.replace(/^\//, "") : "";
 const enabled = Boolean(uri && /^wallet_test_[a-z0-9_-]+$/i.test(databaseName));
 
-test("repeated refund events create one incident and never change the wallet", {
+test("concurrent and repeated refund events create one incident without changing wallet", {
   skip: !enabled && "Set WALLET_TEST_MONGODB_URI to a disposable wallet_test_* database",
 }, async (t) => {
   let userId = null;
@@ -48,7 +48,12 @@ test("repeated refund events create one incident and never change the wallet", {
     normalizedStatus: "refunded",
   };
 
-  await recordWalletPaymentIncident({ deposit, providerOrder });
+  const concurrent = await Promise.allSettled([
+    recordWalletPaymentIncident({ deposit, providerOrder }),
+    recordWalletPaymentIncident({ deposit, providerOrder }),
+  ]);
+  assert.equal(concurrent.filter((item) => item.status === "fulfilled").length, 2);
+  // A later provider retry must also remain idempotent.
   await recordWalletPaymentIncident({ deposit, providerOrder });
 
   const [incidents, updatedUser, transactions, updatedDeposit] = await Promise.all([
