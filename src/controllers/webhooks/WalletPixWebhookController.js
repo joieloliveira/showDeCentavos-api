@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import WalletDeposit from "../../models/WalletDeposit.js";
 import MercadoPagoProvider from "../../services/payments/MercadoPagoProvider.js";
 import { processApprovedMercadoPagoWalletDeposit } from "../../services/MercadoPagoWalletDepositService.js";
+import { recordWalletPaymentIncident } from "../../services/WalletPaymentIncidentService.js";
 
 export const walletPixWebhook = async (req, res) => {
   try {
@@ -47,6 +48,10 @@ export const walletPixWebhook = async (req, res) => {
       { returnDocument: "after" }
     );
     if (!linkedDeposit) return res.sendStatus(500);
+
+    if (providerOrder.normalizedStatus === "refunded" || providerOrder.normalizedStatus === "charged_back") {
+      await recordWalletPaymentIncident({ deposit: linkedDeposit, providerOrder });
+    }
 
     if (providerOrder.normalizedStatus === "approved") {
       await processApprovedMercadoPagoWalletDeposit({
