@@ -11,7 +11,8 @@ export async function recordWalletPaymentIncident({ deposit, providerOrder }) {
       providerOrder.externalReference !== String(deposit._id)) {
     throw new Error("Evento de pagamento não corresponde ao depósito.");
   }
-  return WalletPaymentIncident.findOneAndUpdate(
+  try {
+    return await WalletPaymentIncident.findOneAndUpdate(
     { deposit: deposit._id, providerStatus: providerOrder.normalizedStatus },
     {
       $setOnInsert: {
@@ -23,5 +24,16 @@ export async function recordWalletPaymentIncident({ deposit, providerOrder }) {
       $set: { lastObservedAt: new Date() },
     },
     { upsert: true, returnDocument: "after", runValidators: true }
-  );
+    );
+  } catch (error) {
+    // Two concurrent upserts can race on the unique deposit/status index.
+    // A duplicate-key error means another request already recorded the incident.
+    if (error?.code !== 11000) throw error;
+    const existing = await WalletPaymentIncident.findOne({
+      deposit: deposit._id,
+      providerStatus: providerOrder.normalizedStatus,
+    });
+    if (!existing) throw error;
+    return existing;
+  }
 }
