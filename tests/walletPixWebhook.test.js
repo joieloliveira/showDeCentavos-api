@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { mock } from "node:test";
-import { WebhookSignatureValidator } from "mercadopago";
+import { WebhookSignatureValidator, InvalidWebhookSignatureError } from "mercadopago";
 import WalletDeposit from "../src/models/WalletDeposit.js";
 import MercadoPagoProvider from "../src/services/payments/MercadoPagoProvider.js";
 import { walletPixWebhook } from "../src/controllers/webhooks/WalletPixWebhookController.js";
@@ -41,14 +41,14 @@ test("webhook refuses requests without signature", async (t) => {
 test("webhook refuses a rejected signature", async (t) => {
   withSecret(t);
   mock.method(WebhookSignatureValidator, "validate", () => {
-    throw new Error("signature rejected");
+    throw new InvalidWebhookSignatureError("signature rejected");
   });
   const provider = mock.method(MercadoPagoProvider, "getOrder", async () => {
     throw new Error("unexpected provider call");
   });
   const res = makeResponse();
   await walletPixWebhook(makeRequest(), res);
-  assert.equal(res.code, 500);
+  assert.equal(res.code, 401);
   assert.equal(provider.mock.callCount(), 0);
 });
 
