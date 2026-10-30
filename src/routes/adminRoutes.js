@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import auth from "../middlewares/auth.js";
-import { listAdminAuctions } from "../controllers/adminAuctionController.js";
+import { listAdminAuctions, listAdminAuctionProducts } from "../controllers/adminAuctionController.js";
 import isAdmin from "../middlewares/isAdmin.js";
 import { listAdminWalletIncidents, getAdminWalletIncident } from "../controllers/adminWalletIncidentController.js";
 
@@ -13,6 +13,7 @@ import {
 
 const router = Router();
 
+router.get("/auctions/products", auth, isAdmin, listAdminAuctionProducts);
 router.get("/auctions", auth, isAdmin, listAdminAuctions);
 
 router.get("/wallet/incidents", auth, isAdmin, listAdminWalletIncidents);
