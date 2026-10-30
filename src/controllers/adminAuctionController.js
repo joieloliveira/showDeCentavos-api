@@ -36,3 +36,17 @@ export const listAdminAuctions = async (req, res) => {
     return res.status(500).json({ message: "Erro ao consultar leilões." });
   }
 };
+
+export const listAdminAuctionProducts = async (req, res) => {
+  try {
+    const products = await Product.find({ status: "active" })
+      .select("name slug price stock reservedStock")
+      .sort({ name: 1, _id: 1 })
+      .limit(100)
+      .lean();
+    return res.status(200).json({ products });
+  } catch (error) {
+    console.error("Erro ao consultar produtos para leilões:", error);
+    return res.status(500).json({ message: "Erro ao consultar produtos." });
+  }
+};
