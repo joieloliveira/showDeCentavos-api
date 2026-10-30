@@ -2,6 +2,7 @@
 import { Router } from "express";
 
 import auth from "../middlewares/auth.js";
+import isAdmin from "../middlewares/isAdmin.js";
 
 import {
   getBidByIdempotencyKey,
@@ -34,9 +35,9 @@ router.post("/:id/bids", auth, placeBid);
 router.get("/:id", getAuctionById);
 
 // Cadastro de leilões — somente administrador
-router.post("/", auth, createAuction);
+router.post("/", auth, isAdmin, createAuction);
 
 // Iniciar contagem de espera — somente administrador
-router.post("/:id/start-waiting", auth, startAuctionWaiting);
+router.post("/:id/start-waiting", auth, isAdmin, startAuctionWaiting);
 
 export default router;
