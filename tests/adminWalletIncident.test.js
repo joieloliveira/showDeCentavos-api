@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import isAdmin from "../src/middlewares/isAdmin.js";
 import WalletPaymentIncident from "../src/models/WalletPaymentIncident.js";
+import User from "../src/models/User.js";
 import { listAdminWalletIncidents } from "../src/controllers/adminWalletIncidentController.js";
 
 const res = () => ({
@@ -9,17 +10,55 @@ const res = () => ({
   status(code) { this.code = code; return this; },
   json(payload) { this.payload = payload; return this; },
 });
-test("non-admin access is denied", () => {
+const mockUser = (t, user) => {
+  const find = mock.method(User, "findById", (id) => {
+    assert.equal(id, "user-id");
+    return { select(fields) {
+      assert.equal(fields, "role isActive");
+      return { lean: async () => user };
+    } };
+  });
+  t.after(() => find.mock.restore());
+};
+
+test("non-admin access is denied", async (t) => {
+  mockUser(t, { role: "customer", isActive: true });
   const response = res();
   let called = false;
-  isAdmin({ user: { role: "customer" } }, response, () => { called = true; });
+  await isAdmin({ user: { id: "user-id", role: "admin" } }, response, () => { called = true; });
   assert.equal(response.code, 403);
   assert.equal(called, false);
 });
-test("missing authenticated user is denied", () => {
+test("missing authenticated user is denied", async () => {
   const response = res();
-  isAdmin({}, response, () => assert.fail("must not proceed"));
+  await isAdmin({}, response, () => assert.fail("must not proceed"));
   assert.equal(response.code, 401);
+});
+test("revoked administrator role is denied despite old admin JWT", async (t) => {
+  mockUser(t, { role: "customer", isActive: true });
+  const response = res();
+  await isAdmin({ user: { id: "user-id", role: "admin" } }, response, () => assert.fail("must not proceed"));
+  assert.equal(response.code, 403);
+});
+test("inactive administrator is denied", async (t) => {
+  mockUser(t, { role: "admin", isActive: false });
+  const response = res();
+  await isAdmin({ user: { id: "user-id", role: "admin" } }, response, () => assert.fail("must not proceed"));
+  assert.equal(response.code, 403);
+});
+test("active administrator is allowed based on database role", async (t) => {
+  mockUser(t, { role: "admin", isActive: true });
+  const response = res();
+  let called = false;
+  await isAdmin({ user: { id: "user-id", role: "customer" } }, response, () => { called = true; });
+  assert.equal(response.code, 200);
+  assert.equal(called, true);
+});
+test("deleted administrator is denied", async (t) => {
+  mockUser(t, null);
+  const response = res();
+  await isAdmin({ user: { id: "user-id", role: "admin" } }, response, () => assert.fail("must not proceed"));
+  assert.equal(response.code, 403);
 });
 test("invalid filters are rejected before querying database", async () => {
   const response = res();
