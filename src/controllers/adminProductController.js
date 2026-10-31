@@ -1,7 +1,7 @@
 import Product from '../models/Product.js';
 export async function listAdminProducts(req,res) {
  try {
-  const products=await Product.find({}).select('name slug description price stock status coverImage createdAt').sort({createdAt:-1}).limit(100).lean();
+  const products=await Product.find({}).select('name slug description price stock status coverImage images createdAt').sort({createdAt:-1}).limit(100).lean();
   return res.json({products});
  } catch(error) {console.error('Admin products list:',error);return res.status(500).json({message:'Erro ao listar produtos.'});}
 }
