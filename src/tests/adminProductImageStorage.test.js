@@ -123,3 +123,59 @@ test('partial R2 upload failure cleans successful objects and leaves MongoDB unc
     else process.env.R2_PUBLIC_URL = oldPublicUrl;
   }
 });
+
+
+test('MongoDB save failure after R2 upload triggers compensating object deletion', {
+  skip: !uri ? 'Set WALLET_TEST_MONGODB_URI' : false,
+}, async () => {
+  assert.ok(safe(uri), 'Unsafe MongoDB URI refused');
+  const slug = 'storage-db-failure-' + randomUUID();
+  const owner = new mongoose.Types.ObjectId();
+  const operations = [];
+  let id;
+  const sendMock = mock.method(storage, 'send', async command => {
+    operations.push(command.constructor.name);
+    return {};
+  });
+  const oldUrl = process.env.R2_PUBLIC_URL;
+  process.env.R2_PUBLIC_URL = 'https://example.invalid';
+  let saveMock;
+  try {
+    await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
+    const product = await Product.create({ seller: owner, slug,
+      name: 'Falha no banco teste', description: 'Produto temporario',
+      price: 10, stock: 1 });
+    id = product._id;
+    const originalSave = Product.prototype.save;
+    saveMock = mock.method(Product.prototype, 'save', function (...args) {
+      if (String(this._id) === String(id)) {
+        return Promise.reject(new Error('Simulated MongoDB save failure'));
+      }
+      return originalSave.apply(this, args);
+    });
+    const result = res();
+    const oldError = console.error;
+    console.error = () => {};
+    try {
+      await uploadProductImages({
+        params: { id: String(id) },
+        user: { id: String(owner), role: 'user' },
+        files: [{ originalname: 'one.png', mimetype: 'image/png', buffer: Buffer.from('fake') }],
+      }, result);
+    } finally {
+      console.error = oldError;
+    }
+    assert.equal(result.statusCode, 500);
+    assert.deepEqual(operations, ['PutObjectCommand', 'DeleteObjectCommand']);
+    const unchanged = await Product.findById(id);
+    assert.equal(unchanged.images.length, 0);
+    assert.equal(unchanged.coverImage.key, null);
+  } finally {
+    if (saveMock) saveMock.mock.restore();
+    if (id) await Product.deleteOne({ _id: id, slug });
+    await mongoose.disconnect();
+    sendMock.mock.restore();
+    if (oldUrl === undefined) delete process.env.R2_PUBLIC_URL;
+    else process.env.R2_PUBLIC_URL = oldUrl;
+  }
+});
