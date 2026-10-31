@@ -7,7 +7,7 @@ const MAX_CLIENTS_TOTAL = 1000;
 export function publishAuctionEvent(auctionId, payload) {
   const subscribers = clients.get(String(auctionId));
   if (!subscribers) return;
-  const frame = 'event: auction-update\\ndata: ' + JSON.stringify(payload) + '\\n\\n';
+  const frame = 'event: auction-update\ndata: ' + JSON.stringify(payload) + '\n\n';
   for (const res of [...subscribers]) {
     if (res.destroyed || res.writableEnded) {
       subscribers.delete(res);
@@ -36,10 +36,10 @@ export function subscribeAuctionEvents(req, res, auctionId) {
   res.flushHeaders?.();
   subscribers.add(res);
   clients.set(key, subscribers);
-  res.write(': connected\\n\\n');
+  res.write(': connected\n\n');
   const heartbeat = setInterval(() => {
     if (res.destroyed || res.writableEnded) return cleanup();
-    res.write(': heartbeat\\n\\n');
+    res.write(': heartbeat\n\n');
   }, 20000);
   heartbeat.unref?.();
   function cleanup() {
