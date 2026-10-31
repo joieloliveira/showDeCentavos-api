@@ -1,7 +1,7 @@
 import { Router } from "express";
 
 import auth from "../middlewares/auth.js";
-import { listAdminProducts, createAdminProduct } from "../controllers/adminProductController.js";
+import { listAdminProducts, createAdminProduct, updateAdminProduct } from "../controllers/adminProductController.js";
 import { listAdminAuctions, listAdminAuctionProducts } from "../controllers/adminAuctionController.js";
 import isAdmin from "../middlewares/isAdmin.js";
 import { listAdminWalletIncidents, getAdminWalletIncident } from "../controllers/adminWalletIncidentController.js";
@@ -16,6 +16,7 @@ const router = Router();
 
 router.get("/products", auth, isAdmin, listAdminProducts);
 router.post("/products", auth, isAdmin, createAdminProduct);
+router.patch("/products/:id", auth, isAdmin, updateAdminProduct);
 router.get("/auctions/products", auth, isAdmin, listAdminAuctionProducts);
 router.get("/auctions", auth, isAdmin, listAdminAuctions);
 
