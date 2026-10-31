@@ -851,103 +851,65 @@ export const deleteProduct = async (req, res) => {
 
 export const uploadProductImages = async (req, res) => {
     let uploadedImages = [];
-
+    let committed = false;
     try {
         const { id } = req.params;
-
         const product = await Product.findById(id);
+        if (!product) return res.status(404).json({ message: "Produto não encontrado." });
 
-        if (!product) {
-            return res.status(404).json({
-                message: "Produto não encontrado.",
-            });
+        const isOwner = product.seller?.toString() === req.user.id;
+        if (!isOwner && req.user.role !== "admin") {
+            return res.status(403).json({ message: "Você não tem permissão para alterar este produto." });
         }
-
-        const isOwner =
-            product.seller?.toString() === req.user.id;
-
-        const isAdmin =
-            req.user.role === "admin";
-
-        if (!isOwner && !isAdmin) {
-            return res.status(403).json({
-                message:
-                    "Você não tem permissão para alterar este produto.",
-            });
-        }
-
-        if (!req.files || req.files.length === 0) {
-            return res.status(400).json({
-                message: "Nenhuma imagem enviada.",
-            });
-        }
+        if (!req.files?.length) return res.status(400).json({ message: "Nenhuma imagem enviada." });
 
         const MAX_IMAGES = 8;
+        if (product.images.length + req.files.length > MAX_IMAGES) {
+            return res.status(400).json({ message: "O produto pode ter no máximo 8 imagens." });
+        }
 
-        if (
-            product.images.length + req.files.length >
-            MAX_IMAGES
-        ) {
-            return res.status(400).json({
-                message: `O produto pode ter no máximo ${MAX_IMAGES} imagens.`,
+        const results = await Promise.allSettled(req.files.map(file => uploadImage(file, "products")));
+        uploadedImages = results.filter(result => result.status === "fulfilled").map(result => result.value);
+        const failed = results.find(result => result.status === "rejected");
+        if (failed) throw failed.reason;
+
+        // A single atomic update enforces the eight-image limit across concurrent requests.
+        const imageEntries = uploadedImages.map(({ url, key }) => ({ url, key }));
+        const updated = await Product.findOneAndUpdate(
+            { _id: id, $expr: { $lte: [{ $size: "$images" }, MAX_IMAGES - imageEntries.length] } },
+            [
+                { $set: {
+                    images: { $concatArrays: ["$images", { $literal: imageEntries }] },
+                    coverImage: {
+                        $cond: [
+                            { $or: [
+                                { $eq: ["$coverImage.url", null] },
+                                { $eq: ["$coverImage.url", ""] },
+                                { $not: ["$coverImage.url"] }
+                            ] },
+                            { $literal: imageEntries[0] },
+                            "$coverImage"
+                        ]
+                    }
+                } }
+            ],
+            { new: true }
+        );
+        if (!updated) {
+            return res.status(409).json({ message: "O limite de 8 imagens foi atingido ou o produto foi removido." });
+        }
+        committed = true;
+        return res.status(200).json({ message: "Imagens enviadas com sucesso.", images: updated.images });
+    } catch (error) {
+        console.error("Erro ao enviar imagens do produto:", error);
+        return res.status(500).json({ message: "Erro interno do servidor." });
+    } finally {
+        if (!committed && uploadedImages.length) {
+            const cleanup = await Promise.allSettled(uploadedImages.map(image => deleteImage(image.key)));
+            cleanup.forEach((result, index) => {
+                if (result.status === "rejected") console.error("Falha ao limpar imagem do R2:", uploadedImages[index].key, result.reason);
             });
         }
-
-        // Preserve successful uploads so they can be rolled back even
-        // when another file in the same batch fails.
-        const results = await Promise.allSettled(
-            req.files.map((file) => uploadImage(file, "products"))
-        );
-        uploadedImages = results
-            .filter((result) => result.status === "fulfilled")
-            .map((result) => result.value);
-        const failed = results.find((result) => result.status === "rejected");
-        if (failed) {
-            throw failed.reason;
-        }
-
-        product.images.push(
-            ...uploadedImages.map((image) => ({
-                url: image.url,
-                key: image.key,
-            }))
-        );
-
-        if (
-            !product.coverImage?.url &&
-            uploadedImages.length > 0
-        ) {
-            product.coverImage = {
-                url: uploadedImages[0].url,
-                key: uploadedImages[0].key,
-            };
-        }
-
-        await product.save();
-
-        return res.status(200).json({
-            message: "Imagens enviadas com sucesso.",
-            images: product.images,
-        });
-    } catch (error) {
-        console.error(
-            "Erro ao enviar imagens do produto:",
-            error
-        );
-
-        // Se o upload foi feito no R2 mas o banco falhou,
-        // tentamos remover os arquivos enviados.
-        if (uploadedImages.length > 0) {
-            await Promise.allSettled(
-                uploadedImages.map((image) =>
-                    deleteImage(image.key)
-                )
-            );
-        }
-
-        return res.status(500).json({
-            message: "Erro interno do servidor.",
-        });
     }
 };
 
