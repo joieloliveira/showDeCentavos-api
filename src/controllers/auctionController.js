@@ -1,3 +1,4 @@
+import { subscribeAuctionEvents } from "../services/AuctionEventsService.js";
 
 import mongoose from "mongoose";
 import Auction from "../models/Auction.js";
@@ -212,5 +213,35 @@ export const startAuctionWaiting = async (req, res) => {
     return res.status(500).json({
       message: "Erro interno do servidor.",
     });
+  }
+};
+
+// Lightweight public snapshot for frequent countdown/price synchronization.
+// Never exposes wallet balances, user identity, or bid payment records.
+export const getAuctionLiveState = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: "ID do leilão inválido." });
+    }
+    const auction = await Auction.findById(req.params.id)
+      .select("status currentPriceCents bidCount startsAt endsAt bidCostCents")
+      .lean();
+    if (!auction) return res.status(404).json({ message: "Leilão não encontrado." });
+    res.set("Cache-Control", "no-store");
+    return res.status(200).json({ auction, serverTime: new Date().toISOString() });
+  } catch (error) {
+    console.error("Erro ao consultar estado do leilão:", error);
+    return res.status(500).json({ message: "Erro interno do servidor." });
+  }
+};
+
+export const streamAuctionEvents = async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: "ID do leilão inválido." });
+  try {
+    if (!(await Auction.exists({ _id: req.params.id }))) return res.status(404).json({ message: "Leilão não encontrado." });
+    return subscribeAuctionEvents(req, res, req.params.id);
+  } catch (error) {
+    console.error("Erro ao conectar eventos do leilão:", error);
+    return res.status(500).json({ message: "Erro interno do servidor." });
   }
 };

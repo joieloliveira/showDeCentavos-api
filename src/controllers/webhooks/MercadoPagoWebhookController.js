@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 
 import Order from "../../models/Order.js";
+import Product from "../../models/Product.js";
+import WalletDeposit from "../../models/WalletDeposit.js";
 
 import {
   WebhookSignatureValidator,
@@ -10,6 +12,7 @@ import {
 import MercadoPagoProvider from "../../services/payments/MercadoPagoProvider.js";
 
 import { processApprovedOrder } from "../../services/OrderPaymentService.js";
+import { processApprovedMercadoPagoWalletDeposit } from "../../services/MercadoPagoWalletDepositService.js";
 
 const paymentProvider = MercadoPagoProvider;
 
@@ -159,6 +162,50 @@ export const mercadoPagoOrderWebhook = async (
       );
 
       return res.sendStatus(200);
+    }
+
+    // O mesmo webhook configurado no Mercado Pago atende pedidos e recargas.
+    // Uma recarga só é creditada após verificação independente no provedor.
+    if (mongoose.isObjectIdOrHexString(internalOrderId)) {
+      const walletDeposit = await WalletDeposit.findOne({
+        _id: internalOrderId,
+        provider: "mercadopago",
+        $or: [
+          { providerOrderId: String(providerOrder.orderId) },
+          { providerOrderId: null },
+        ],
+      });
+      if (walletDeposit) {
+        // Mesmo que o pagamento ainda esteja pendente, guardamos o ID da
+        // cobrança recebida no webhook. Isso permite reconciliação posterior
+        // quando a resposta original da criação do PIX sofreu timeout.
+        const orderId = String(providerOrder.orderId);
+        const linkedDeposit = await WalletDeposit.findOneAndUpdate(
+          {
+            _id: walletDeposit._id,
+            provider: "mercadopago",
+            $or: [{ providerOrderId: null }, { providerOrderId: orderId }],
+          },
+          {
+            $set: {
+              providerOrderId: orderId,
+              chargeStatus: "resolved",
+            },
+          },
+          { returnDocument: "after" }
+        );
+        if (!linkedDeposit) {
+          console.error("Recarga vinculada a outra cobrança:", walletDeposit._id);
+          return res.sendStatus(500);
+        }
+        if (providerOrder.normalizedStatus === "approved") {
+          await processApprovedMercadoPagoWalletDeposit({
+            depositId: String(walletDeposit._id),
+            providerOrderId: String(providerOrder.orderId),
+          });
+        }
+        return res.sendStatus(200);
+      }
     }
 
     const currentOrder =
