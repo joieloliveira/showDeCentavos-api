@@ -234,7 +234,7 @@ export const getAuctionLiveState = async (req, res) => {
       return res.status(400).json({ message: "ID do leilão inválido." });
     }
     const auction = await Auction.findById(req.params.id)
-      .select("status currentPriceCents bidCount startsAt endsAt bidCostCents")
+      .select("status currentPriceCents bidCount startsAt endsAt bidCostCents winner")
       .lean();
     if (!auction) return res.status(404).json({ message: "Leilão não encontrado." });
     res.set("Cache-Control", "no-store");
