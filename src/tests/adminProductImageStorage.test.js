@@ -179,3 +179,55 @@ test('MongoDB save failure after R2 upload triggers compensating object deletion
     else process.env.R2_PUBLIC_URL = oldUrl;
   }
 });
+
+
+test('concurrent uploads cannot exceed eight images', {
+  skip: !uri ? 'Set WALLET_TEST_MONGODB_URI' : false,
+}, async () => {
+  assert.ok(safe(uri), 'Unsafe MongoDB URI refused');
+  const slug = 'concurrent-images-' + randomUUID();
+  const owner = new mongoose.Types.ObjectId();
+  let id;
+  const operations = [];
+  const sendMock = mock.method(storage, 'send', async command => {
+    operations.push(command.constructor.name);
+    return {};
+  });
+  const oldUrl = process.env.R2_PUBLIC_URL;
+  process.env.R2_PUBLIC_URL = 'https://example.invalid';
+  try {
+    await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
+    const product = await Product.create({
+      seller: owner, slug, name: 'Concorrencia de imagens',
+      description: 'Produto temporario', price: 10, stock: 1,
+      images: Array.from({ length: 7 }, (_, i) => ({
+        key: 'mock/existing-' + i + '.png',
+        url: 'https://example.invalid/existing-' + i + '.png',
+      })),
+      coverImage: { key: 'mock/existing-0.png', url: 'https://example.invalid/existing-0.png' },
+    });
+    id = product._id;
+    const user = { id: String(owner), role: 'user' };
+    const makeRequest = () => ({
+      params: { id: String(id) }, user,
+      files: [{ originalname: 'new.png', mimetype: 'image/png', buffer: Buffer.from('fake') }],
+    });
+    const first = res();
+    const second = res();
+    await Promise.all([
+      uploadProductImages(makeRequest(), first),
+      uploadProductImages(makeRequest(), second),
+    ]);
+    assert.deepEqual([first.statusCode, second.statusCode].sort(), [200, 409]);
+    const saved = await Product.findById(id);
+    assert.equal(saved.images.length, 8);
+    assert.equal(operations.filter(op => op === 'PutObjectCommand').length, 2);
+    assert.equal(operations.filter(op => op === 'DeleteObjectCommand').length, 1);
+  } finally {
+    if (id) await Product.deleteOne({ _id: id, slug });
+    await mongoose.disconnect();
+    sendMock.mock.restore();
+    if (oldUrl === undefined) delete process.env.R2_PUBLIC_URL;
+    else process.env.R2_PUBLIC_URL = oldUrl;
+  }
+});
