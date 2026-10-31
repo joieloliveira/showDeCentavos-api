@@ -44,7 +44,7 @@ export const processAuctionSchedules = async () => {
         { _id: item._id, status: "active", bidCount: { $gt: 0 },
           endsAt: { $lte: now }, lastBidder: { $ne: null } },
         [{ $set: { status: "finished", winner: "$lastBidder" } }],
-        { returnDocument: "after" }
+        { returnDocument: "after", updatePipeline: true }
       );
       if (!auction) continue;
       finished++;
