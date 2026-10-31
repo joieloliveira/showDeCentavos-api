@@ -1,3 +1,4 @@
+import { subscribeAuctionEvents } from "../services/AuctionEventsService.js";
 
 import mongoose from "mongoose";
 import Auction from "../models/Auction.js";
@@ -230,6 +231,17 @@ export const getAuctionLiveState = async (req, res) => {
     return res.status(200).json({ auction, serverTime: new Date().toISOString() });
   } catch (error) {
     console.error("Erro ao consultar estado do leilão:", error);
+    return res.status(500).json({ message: "Erro interno do servidor." });
+  }
+};
+
+export const streamAuctionEvents = async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: "ID do leilão inválido." });
+  try {
+    if (!(await Auction.exists({ _id: req.params.id }))) return res.status(404).json({ message: "Leilão não encontrado." });
+    return subscribeAuctionEvents(req, res, req.params.id);
+  } catch (error) {
+    console.error("Erro ao conectar eventos do leilão:", error);
     return res.status(500).json({ message: "Erro interno do servidor." });
   }
 };
