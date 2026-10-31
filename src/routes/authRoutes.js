@@ -42,6 +42,7 @@ router.get(
           name: user.name,
           email: user.email,
           role: user.role,
+          publicNickname: user.publicNickname,
         },
       });
     } catch (error) {
