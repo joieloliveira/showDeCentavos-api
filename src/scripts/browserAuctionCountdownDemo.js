@@ -69,12 +69,25 @@ async function main() {
     app.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
     app.get('/api/auctions/:id', async (req, res) => {
       if (req.params.id !== String(auctionId)) return res.sendStatus(404);
-      // Start the 15-second clock on first page load, not at server startup.
-      await Auction.updateOne({ _id: auctionId, endsAt: null, status: 'active' },
-        { $set: { endsAt: new Date(Date.now() + 15_000) } });
       const current = await Auction.findById(auctionId)
         .populate('product', 'name description price images coverImage');
       return res.json({ auction: current });
+    });
+    // Demo-only control: reset countdown after the page is already open.
+    // Loopback-only server, exact auction ID, no financial actions.
+    app.post('/demo/start', async (_req, res) => {
+      const deadline = new Date(Date.now() + 15_000);
+      const updated = await Auction.findOneAndUpdate(
+        { _id: auctionId, status: { $in: ['active', 'finished'] } },
+        { $set: { status: 'active', endsAt: deadline, winner: null } },
+        { returnDocument: 'after' });
+      if (!updated) return res.status(409).json({ message: 'Demo unavailable' });
+      publishAuctionEvent(auctionId, {
+        status: updated.status, currentPriceCents: updated.currentPriceCents,
+        bidCount: updated.bidCount, startsAt: updated.startsAt, endsAt: updated.endsAt,
+      });
+      console.log('Demo countdown restarted: 15 seconds.');
+      return res.json({ endsAt: deadline.toISOString(), status: 'active' });
     });
     app.get('/api/auctions/:id/live', async (req, res) => {
       if (req.params.id !== String(auctionId)) return res.sendStatus(404);
@@ -104,7 +117,8 @@ async function main() {
     server = app.listen(3002, '127.0.0.1', () => {
       console.log('DEMO ONLY: http://localhost:3000/auctions/registered/' + auctionId);
       console.log('API demo: http://127.0.0.1:3002/api');
-      console.log('First browser visit starts a single 15-second countdown.');
+      console.log('Keep the browser page open, then start/restart the countdown with:');
+      console.log('Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3002/demo/start');
       console.log('Press Ctrl+C to delete temporary demo records.');
     });
   } catch (error) {
