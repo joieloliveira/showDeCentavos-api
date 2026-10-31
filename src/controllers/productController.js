@@ -854,7 +854,6 @@ export const uploadProductImages = async (req, res) => {
 
     try {
         const { id } = req.params;
-        console.log(id);
 
         const product = await Product.findById(id);
 
@@ -894,11 +893,18 @@ export const uploadProductImages = async (req, res) => {
             });
         }
 
-        uploadedImages = await Promise.all(
-            req.files.map((file) =>
-                uploadImage(file, "products")
-            )
+        // Preserve successful uploads so they can be rolled back even
+        // when another file in the same batch fails.
+        const results = await Promise.allSettled(
+            req.files.map((file) => uploadImage(file, "products"))
         );
+        uploadedImages = results
+            .filter((result) => result.status === "fulfilled")
+            .map((result) => result.value);
+        const failed = results.find((result) => result.status === "rejected");
+        if (failed) {
+            throw failed.reason;
+        }
 
         product.images.push(
             ...uploadedImages.map((image) => ({
