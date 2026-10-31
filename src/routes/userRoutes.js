@@ -4,6 +4,7 @@ import auth from "../middlewares/auth.js";
 import isAdmin from "../middlewares/isAdmin.js";
 import {
   becomeSeller,
+  updatePublicNickname,
   listAdminUsers,
   getAdminUserById,
   updateAdminUserStatus,
@@ -46,6 +47,8 @@ router.put(
   isAdmin,
   updateAdminUserRole
 );
+
+router.put("/me/public-nickname", auth, updatePublicNickname);
 
 router.post("/become-seller", auth, becomeSeller);
 
