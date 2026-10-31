@@ -15,6 +15,7 @@ import {
   listAuctions,
   getAuctionById,
   getAuctionLiveState,
+  streamAuctionEvents,
   startAuctionWaiting,
 } from "../controllers/auctionController.js";
 
@@ -33,6 +34,7 @@ router.post("/:id/bids", auth, placeBid);
 
 
 // Consultar um leilão pelo ID
+router.get("/:id/events", streamAuctionEvents);
 router.get("/:id/live", getAuctionLiveState);
 router.get("/:id", getAuctionById);
 
