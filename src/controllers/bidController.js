@@ -6,6 +6,10 @@ import User from "../models/User.js";
 import WalletTransaction from "../models/WalletTransaction.js";
 
 export const placeBid = async (req, res) => {
+    // Fail closed: financial bids require an explicit server-side release switch.
+    if (process.env.AUCTION_BIDDING_ENABLED !== "true") {
+        return res.status(503).json({ message: "Lances temporariamente indisponíveis." });
+    }
     try {
         const { id } = req.params;
         const { idempotencyKey } = req.body ?? {};
@@ -177,7 +181,7 @@ export const placeBid = async (req, res) => {
                         },
                     },
                     {
-                        new: true,
+                        returnDocument: "after",
                         session,
                         runValidators: true,
                     }
@@ -225,7 +229,7 @@ export const placeBid = async (req, res) => {
                         },
                     },
                     {
-                        new: true,
+                        returnDocument: "after",
                         session,
                         runValidators: true,
                     }
