@@ -641,7 +641,7 @@ export const updateProduct = async (req, res) => {
         }
 
         const isOwner =
-            product.seller.toString() === req.user.id;
+            product.seller?.toString() === req.user.id;
 
         const isAdmin =
             req.user.role === "admin";
@@ -804,7 +804,7 @@ export const deleteProduct = async (req, res) => {
         }
 
         const isOwner =
-            product.seller.toString() === req.user.id;
+            product.seller?.toString() === req.user.id;
 
         const isAdmin =
             req.user.role === "admin";
@@ -864,7 +864,7 @@ export const uploadProductImages = async (req, res) => {
         }
 
         const isOwner =
-            product.seller.toString() === req.user.id;
+            product.seller?.toString() === req.user.id;
 
         const isAdmin =
             req.user.role === "admin";
@@ -971,7 +971,7 @@ export const deleteProductImage = async (req, res) => {
         }
 
         const isOwner =
-            product.seller.toString() === req.user.id;
+            product.seller?.toString() === req.user.id;
 
         const isAdmin =
             req.user.role === "admin";
@@ -1051,7 +1051,7 @@ export const setProductCover = async (req, res) => {
         }
 
         const isOwner =
-            product.seller.toString() === req.user.id;
+            product.seller?.toString() === req.user.id;
 
         const isAdmin =
             req.user.role === "admin";
