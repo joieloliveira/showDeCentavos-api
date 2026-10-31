@@ -69,3 +69,57 @@ test('upload and delete persist image changes using mocked R2', {
     else process.env.R2_PUBLIC_URL = originalPublicUrl;
   }
 });
+
+
+test('partial R2 upload failure cleans successful objects and leaves MongoDB unchanged', {
+  skip: !uri ? 'Set WALLET_TEST_MONGODB_URI' : false,
+}, async () => {
+  assert.ok(safe(uri), 'Unsafe MongoDB URI refused');
+  const slug = 'storage-failure-' + randomUUID();
+  const owner = new mongoose.Types.ObjectId();
+  const operations = [];
+  let id;
+  let uploads = 0;
+  const sendMock = mock.method(storage, 'send', async (command) => {
+    operations.push(command.constructor.name);
+    if (command.constructor.name === 'PutObjectCommand' && ++uploads === 2) {
+      throw new Error('Simulated R2 upload failure');
+    }
+    return {};
+  });
+  const oldPublicUrl = process.env.R2_PUBLIC_URL;
+  process.env.R2_PUBLIC_URL = 'https://example.invalid';
+  try {
+    await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
+    const product = await Product.create({ seller: owner, slug,
+      name: 'Teste de falha no upload', description: 'Registro temporario',
+      price: 10, stock: 1 });
+    id = product._id;
+    const result = res();
+    const oldError = console.error;
+    console.error = () => {};
+    try {
+      await uploadProductImages({
+        params: { id: String(id) }, user: { id: String(owner), role: 'user' },
+        files: [
+          { originalname: 'one.png', mimetype: 'image/png', buffer: Buffer.from('fake1') },
+          { originalname: 'two.png', mimetype: 'image/png', buffer: Buffer.from('fake2') },
+        ],
+      }, result);
+    } finally {
+      console.error = oldError;
+    }
+    assert.equal(result.statusCode, 500);
+    assert.equal(operations.filter(op => op === 'PutObjectCommand').length, 2);
+    assert.equal(operations.filter(op => op === 'DeleteObjectCommand').length, 1);
+    const unchanged = await Product.findById(id);
+    assert.equal(unchanged.images.length, 0);
+    assert.equal(unchanged.coverImage.key, null);
+  } finally {
+    if (id) await Product.deleteOne({ _id: id, slug });
+    await mongoose.disconnect();
+    sendMock.mock.restore();
+    if (oldPublicUrl === undefined) delete process.env.R2_PUBLIC_URL;
+    else process.env.R2_PUBLIC_URL = oldPublicUrl;
+  }
+});
