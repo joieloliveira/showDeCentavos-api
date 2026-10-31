@@ -14,6 +14,7 @@ import {
   createAuction,
   listAuctions,
   getAuctionById,
+  getAuctionLiveState,
   startAuctionWaiting,
 } from "../controllers/auctionController.js";
 
@@ -32,6 +33,7 @@ router.post("/:id/bids", auth, placeBid);
 
 
 // Consultar um leilão pelo ID
+router.get("/:id/live", getAuctionLiveState);
 router.get("/:id", getAuctionById);
 
 // Cadastro de leilões — somente administrador
