@@ -1,3 +1,4 @@
+import { publishAuctionEvent } from "../services/AuctionEventsService.js";
 import mongoose from "mongoose";
 
 import Auction from "../models/Auction.js";
@@ -288,6 +289,12 @@ export const placeBid = async (req, res) => {
 
             });
 
+            publishAuctionEvent(id, {
+                status: "active",
+                currentPriceCents: bidResult.currentPriceCents,
+                bidCount: bidResult.bidCount,
+                endsAt: bidResult.expiresAt,
+            });
             return res.status(201).json({
                 message: "Lance registrado com sucesso.",
                 ...bidResult,
