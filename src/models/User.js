@@ -10,6 +10,8 @@ const userSchema = new mongoose.Schema(
       maxlength: 100,
     },
 
+    publicNickname: { type: String, trim: true, minlength: 3, maxlength: 30, default: null },
+
     email: {
       type: String,
       required: true,
