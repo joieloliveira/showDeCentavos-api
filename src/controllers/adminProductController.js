@@ -22,3 +22,42 @@ export async function createAdminProduct(req,res) {
   return res.status(500).json({message:'Erro ao cadastrar produto.'});
  }
 }
+
+export async function updateAdminProduct(req,res) {
+ try {
+  const {id}=req.params;
+  if(!/^[a-f0-9]{24}$/i.test(id))return res.status(400).json({message:'ID inválido.'});
+  const body=req.body;
+  if(!body||typeof body!=='object'||Array.isArray(body))return res.status(400).json({message:'Dados inválidos.'});
+  const allowed=new Set(['name','description','price','stock','status']);
+  const keys=Object.keys(body);
+  if(!keys.length||keys.some(key=>!allowed.has(key)))return res.status(400).json({message:'Campos não permitidos.'});
+  const patch={};
+  if('name' in body) {
+   if(typeof body.name!=='string'||body.name.trim().length<3||body.name.trim().length>150)return res.status(400).json({message:'Nome inválido.'});
+   patch.name=body.name.trim();
+  }
+  if('description' in body) {
+   if(typeof body.description!=='string'||!body.description.trim()||body.description.length>5000)return res.status(400).json({message:'Descrição inválida.'});
+   patch.description=body.description.trim();
+  }
+  if('price' in body) {
+   if(typeof body.price!=='number'||!Number.isFinite(body.price)||body.price<0)return res.status(400).json({message:'Preço inválido.'});
+   patch.price=body.price;
+  }
+  if('stock' in body) {
+   if(!Number.isSafeInteger(body.stock)||body.stock<0)return res.status(400).json({message:'Estoque inválido.'});
+   patch.stock=body.stock;
+  }
+  if('status' in body) {
+   if(!['draft','active','inactive'].includes(body.status))return res.status(400).json({message:'Situação inválida.'});
+   patch.status=body.status;
+  }
+  const product=await Product.findById(id);
+  if(!product)return res.status(404).json({message:'Produto não encontrado.'});
+  if(patch.stock!==undefined&&patch.stock<product.reservedStock)return res.status(409).json({message:'Estoque menor que as reservas existentes.'});
+  Object.assign(product,patch);
+  await product.save();
+  return res.json({product});
+ }catch(error){console.error('Admin product update:',error);return res.status(500).json({message:'Erro ao atualizar produto.'});}
+}
