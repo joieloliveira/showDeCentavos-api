@@ -62,3 +62,48 @@ test('two HTTP SSE clients receive auction updates; unrelated clients do not', a
     server.closeAllConnections();
   }
 });
+
+test('a disconnected SSE client can reconnect and receive subsequent updates', async () => {
+  const app = express();
+  app.get('/auctions/:id/events', (req, res) =>
+    subscribeAuctionEvents(req, res, req.params.id));
+  const server = http.createServer(app);
+  const controllers = [];
+  const readers = [];
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const url = `http://127.0.0.1:${server.address().port}/auctions/reconnect-test/events`;
+    async function connect() {
+      const controller = new AbortController();
+      controllers.push(controller);
+      const response = await fetch(url, { signal: controller.signal });
+      assert.equal(response.status, 200);
+      const reader = response.body.getReader();
+      readers.push(reader);
+      const greeting = await reader.read();
+      assert.match(new TextDecoder().decode(greeting.value), /: connected/);
+      return { controller, reader };
+    }
+    const first = await connect();
+    first.controller.abort();
+    try { await first.reader.cancel(); } catch { /* already aborted */ }
+    // Wait for server-side close notification before re-subscribing.
+    await new Promise(resolve => setTimeout(resolve, 25));
+    const second = await connect();
+    publishAuctionEvent('reconnect-test', {
+      status: 'active', currentPriceCents: 7, bidCount: 7,
+    });
+    const message = await second.reader.read();
+    const frame = new TextDecoder().decode(message.value);
+    assert.match(frame, /^event: auction-update\n/);
+    assert.equal(JSON.parse(frame.split('data: ')[1].trim()).currentPriceCents, 7);
+  } finally {
+    for (const controller of controllers) controller.abort();
+    for (const reader of readers) {
+      try { await reader.cancel(); } catch { /* aborted */ }
+    }
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
