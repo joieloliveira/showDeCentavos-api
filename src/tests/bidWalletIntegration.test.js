@@ -29,6 +29,8 @@ test('one bid debits wallet once and an idempotent retry preserves auction state
   const suffix = randomUUID();
   const slug = 'bid-integration-' + suffix;
   let productId, auctionId, userId;
+  const previousFlag = process.env.AUCTION_BIDDING_ENABLED;
+  process.env.AUCTION_BIDDING_ENABLED = 'true';
   try {
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 5000 });
     await Bid.createCollection();
@@ -80,5 +82,7 @@ test('one bid debits wallet once and an idempotent retry preserves auction state
     if (productId) await Product.deleteOne({ _id: productId, slug });
     if (userId) await User.deleteOne({ _id: userId });
     await mongoose.disconnect();
+    if (previousFlag === undefined) delete process.env.AUCTION_BIDDING_ENABLED;
+    else process.env.AUCTION_BIDDING_ENABLED = previousFlag;
   }
 });
