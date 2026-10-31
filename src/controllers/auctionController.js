@@ -3,6 +3,14 @@ import { subscribeAuctionEvents } from "../services/AuctionEventsService.js";
 import mongoose from "mongoose";
 import Auction from "../models/Auction.js";
 import Product from "../models/Product.js";
+import User from "../models/User.js";
+
+async function getPublicWinnerNickname(auction) {
+  if (auction?.status !== "finished" || !auction.winner) return null;
+  const user = await User.findById(auction.winner).select("publicNickname").lean();
+  return user?.publicNickname || null;
+}
+
 
 export const createAuction = async (req, res) => {
   try {
@@ -119,9 +127,11 @@ export const getAuctionById = async (req, res) => {
       });
     }
 
-    return res.status(200).json({
-      auction,
-    });
+    const safeAuction = auction.toObject();
+    delete safeAuction.winner;
+    delete safeAuction.lastBidder;
+    safeAuction.winnerNickname = await getPublicWinnerNickname(auction);
+    return res.status(200).json({ auction: safeAuction });
   } catch (error) {
     console.error("Erro ao buscar leilão:", error);
 
@@ -228,7 +238,7 @@ export const getAuctionLiveState = async (req, res) => {
       .lean();
     if (!auction) return res.status(404).json({ message: "Leilão não encontrado." });
     res.set("Cache-Control", "no-store");
-    return res.status(200).json({ auction, serverTime: new Date().toISOString() });
+    return res.status(200).json({ auction: { ...auction, winnerNickname: await getPublicWinnerNickname(auction) }, serverTime: new Date().toISOString() });
   } catch (error) {
     console.error("Erro ao consultar estado do leilão:", error);
     return res.status(500).json({ message: "Erro interno do servidor." });
