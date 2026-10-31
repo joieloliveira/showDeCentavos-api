@@ -7,6 +7,7 @@ import mongoose from 'mongoose';
 import { randomUUID } from 'node:crypto';
 import Auction from '../models/Auction.js';
 import Product from '../models/Product.js';
+import User from '../models/User.js';
 import { publishAuctionEvent, subscribeAuctionEvents } from '../services/AuctionEventsService.js';
 
 const uri = process.env.WALLET_TEST_MONGODB_URI;
@@ -25,12 +26,14 @@ if (!isSafe(uri)) {
   process.exit(1);
 }
 
+let demoUserId;
 let productId;
 let auctionId;
 let ticker;
 let server;
 let shuttingDown = false;
 const slug = 'browser-countdown-demo-' + randomUUID();
+const demoEmail = 'demo-winner-' + randomUUID() + '@example.invalid';
 
 async function cleanup() {
   if (shuttingDown) return;
@@ -42,6 +45,7 @@ async function cleanup() {
   }
   try {
     if (auctionId) await Auction.deleteOne({ _id: auctionId });
+    if (demoUserId) await User.deleteOne({ _id: demoUserId, email: demoEmail });
     if (productId) await Product.deleteOne({ _id: productId, slug });
   } finally {
     await mongoose.disconnect();
@@ -57,10 +61,12 @@ async function main() {
       price: 10, stock: 1,
     });
     productId = product._id;
+    const demoUser = await User.create({ name: 'Demo Winner', email: demoEmail, publicNickname: 'VencedorDemo' });
+    demoUserId = demoUser._id;
     const auction = await Auction.create({
       product: productId, status: 'active', bidCostCents: 50,
       currentPriceCents: 1, bidCount: 1,
-      lastBidder: new mongoose.Types.ObjectId(),
+      lastBidder: demoUserId,
       startsAt: new Date(), endsAt: null,
     });
     auctionId = auction._id;
@@ -71,7 +77,11 @@ async function main() {
       if (req.params.id !== String(auctionId)) return res.sendStatus(404);
       const current = await Auction.findById(auctionId)
         .populate('product', 'name description price images coverImage');
-      return res.json({ auction: current });
+      const safe = current.toObject();
+      delete safe.winner;
+      delete safe.lastBidder;
+      safe.winnerNickname = current.status === 'finished' && current.winner ? demoUser.publicNickname : null;
+      return res.json({ auction: safe });
     });
     // Demo-only control: reset countdown after the page is already open.
     // Loopback-only server, exact auction ID, no financial actions.
@@ -92,8 +102,9 @@ async function main() {
     app.get('/api/auctions/:id/live', async (req, res) => {
       if (req.params.id !== String(auctionId)) return res.sendStatus(404);
       const current = await Auction.findById(auctionId)
-        .select('status currentPriceCents bidCount startsAt endsAt bidCostCents').lean();
-      return res.json({ auction: current, serverTime: new Date().toISOString() });
+        .select('status currentPriceCents bidCount startsAt endsAt bidCostCents winner').lean();
+      const { winner, ...publicAuction } = current;
+      return res.json({ auction: { ...publicAuction, winnerNickname: current.status === 'finished' && winner ? demoUser.publicNickname : null }, serverTime: new Date().toISOString() });
     });
     app.get('/api/auctions/:id/events', (req, res) => {
       if (req.params.id !== String(auctionId)) return res.sendStatus(404);
