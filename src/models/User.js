@@ -168,6 +168,8 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+userSchema.index({ publicNickname: 1 }, { unique: true, partialFilterExpression: { publicNickname: { $type: 'string' } }, collation: { locale: 'en', strength: 2 } });
+
 userSchema.index(
   { googleId: 1 },
   {
