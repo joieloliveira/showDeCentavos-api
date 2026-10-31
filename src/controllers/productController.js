@@ -893,7 +893,7 @@ export const uploadProductImages = async (req, res) => {
                     }
                 } }
             ],
-            { new: true }
+            { new: true, updatePipeline: true }
         );
         if (!updated) {
             return res.status(409).json({ message: "O limite de 8 imagens foi atingido ou o produto foi removido." });
