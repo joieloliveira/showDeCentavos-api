@@ -146,12 +146,12 @@ test('MongoDB save failure after R2 upload triggers compensating object deletion
       name: 'Falha no banco teste', description: 'Produto temporario',
       price: 10, stock: 1 });
     id = product._id;
-    const originalSave = Product.prototype.save;
-    saveMock = mock.method(Product.prototype, 'save', function (...args) {
-      if (String(this._id) === String(id)) {
-        return Promise.reject(new Error('Simulated MongoDB save failure'));
+    const originalUpdate = Product.findOneAndUpdate;
+    saveMock = mock.method(Product, 'findOneAndUpdate', async function (...args) {
+      if (String(args[0]?._id) === String(id)) {
+        throw new Error('Simulated MongoDB update failure');
       }
-      return originalSave.apply(this, args);
+      return originalUpdate.apply(this, args);
     });
     const result = res();
     const oldError = console.error;
