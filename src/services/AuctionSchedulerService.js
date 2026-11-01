@@ -1,5 +1,6 @@
 
 import Auction from "../models/Auction.js";
+import { recordAuctionAuditEvent } from "./AuctionAuditService.js";
 import { publishAuctionEvent } from "./AuctionEventsService.js";
 
 let schedulerInterval = null;
@@ -27,6 +28,7 @@ export const processAuctionSchedules = async () => {
       );
       if (!auction) continue;
       activated++;
+      await recordAuctionAuditEvent(auction._id, "activated", now, "scheduler");
       publishAuctionEvent(auction._id, {
         status: auction.status, currentPriceCents: auction.currentPriceCents,
         bidCount: auction.bidCount, startsAt: auction.startsAt, endsAt: auction.endsAt,
@@ -48,6 +50,7 @@ export const processAuctionSchedules = async () => {
       );
       if (!auction) continue;
       finished++;
+      await recordAuctionAuditEvent(auction._id, "finished", now, "scheduler");
       publishAuctionEvent(auction._id, {
         status: auction.status, currentPriceCents: auction.currentPriceCents,
         bidCount: auction.bidCount, startsAt: auction.startsAt, endsAt: auction.endsAt,
