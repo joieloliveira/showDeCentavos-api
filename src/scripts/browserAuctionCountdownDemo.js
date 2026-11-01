@@ -64,10 +64,10 @@ async function main() {
     const demoUser = await User.create({ name: 'Demo Winner', email: demoEmail, publicNickname: 'VencedorDemo' });
     demoUserId = demoUser._id;
     const auction = await Auction.create({
-      product: productId, status: 'active', bidCostCents: 50,
+      product: productId, status: 'scheduled', bidCostCents: 50,
       currentPriceCents: 1, bidCount: 1,
       lastBidder: demoUserId,
-      startsAt: new Date(), endsAt: null,
+      startsAt: null, waitingStartedAt: null, endsAt: null,
     });
     auctionId = auction._id;
     const app = express();
@@ -96,6 +96,18 @@ async function main() {
     });
     // Demo-only control: reset countdown after the page is already open.
     // Loopback-only server, exact auction ID, no financial actions.
+    app.post('/demo/schedule', async (_req, res) => {
+      const now = new Date();
+      const startsAt = new Date(now.getTime() + 10_000);
+      const updated = await Auction.findOneAndUpdate(
+        { _id: auctionId, status: { $in: ['scheduled', 'active', 'finished'] } },
+        { $set: { status: 'scheduled', waitingStartedAt: now, startsAt, endsAt: null, winner: null } },
+        { returnDocument: 'after' });
+      if (!updated) return res.status(409).json({ message: 'Demo unavailable' });
+      publishAuctionEvent(auctionId, { status: 'scheduled', startsAt, endsAt: null,
+        currentPriceCents: updated.currentPriceCents, bidCount: updated.bidCount });
+      return res.json({ status: 'scheduled', startsAt: startsAt.toISOString() });
+    });
     app.post('/demo/start', async (_req, res) => {
       const deadline = new Date(Date.now() + 15_000);
       const updated = await Auction.findOneAndUpdate(
@@ -123,6 +135,15 @@ async function main() {
     });
     ticker = setInterval(async () => {
       try {
+        const started = await Auction.findOneAndUpdate(
+          { _id: auctionId, status: 'scheduled', waitingStartedAt: { $ne: null }, startsAt: { $lte: new Date() } },
+          { $set: { status: 'active', endsAt: new Date(Date.now() + 15_000) } },
+          { returnDocument: 'after' });
+        if (started) {
+          publishAuctionEvent(auctionId, { status: started.status, startsAt: started.startsAt,
+            endsAt: started.endsAt, currentPriceCents: started.currentPriceCents, bidCount: started.bidCount });
+          console.log('Demo scheduled auction activated; 15-second countdown started.');
+        }
         const current = await Auction.findOneAndUpdate(
           { _id: auctionId, status: 'active', endsAt: { $ne: null, $lte: new Date() } },
           [{ $set: { status: 'finished', winner: '$lastBidder' } }],
@@ -140,7 +161,9 @@ async function main() {
       console.log('DEMO ONLY: http://localhost:3000/auctions/registered/' + auctionId);
       console.log('API demo: http://127.0.0.1:3002/api');
       console.log('CATALOG DEMO: http://localhost:3000/auctions');
-      console.log('Keep the browser page open, then start/restart the countdown with:');
+      console.log('To test scheduled -> active -> finished, run:');
+      console.log('Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3002/demo/schedule');
+      console.log('Or start/restart the active countdown directly:');
       console.log('Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3002/demo/start');
       console.log('Press Ctrl+C to delete temporary demo records.');
     });
