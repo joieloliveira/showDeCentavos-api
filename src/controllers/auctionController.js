@@ -89,10 +89,13 @@ export const listAuctions = async (req, res) => {
         model: Product,
         select: "name slug price images coverImage status",
       })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
+    const publicAuctions = auctions.map(({ winner, lastBidder, ...auction }) => auction);
+    res.set("Cache-Control", "no-store");
     return res.status(200).json({
-      auctions,
+      auctions: publicAuctions,
     });
   } catch (error) {
     console.error("Erro ao listar leilões:", error);
