@@ -92,7 +92,14 @@ export const listAuctions = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
-    const publicAuctions = auctions.map(({ winner, lastBidder, ...auction }) => auction);
+    const winnerIds = [...new Set(auctions.filter(a => a.status === 'finished' && a.winner).map(a => String(a.winner)))];
+    const winnerUsers = winnerIds.length ? await User.find({ _id: { $in: winnerIds } })
+      .select('publicNickname').lean() : [];
+    const nicknames = new Map(winnerUsers.map(u => [String(u._id), u.publicNickname || null]));
+    const publicAuctions = auctions.map(({ winner, lastBidder, ...auction }) => ({
+      ...auction,
+      winnerNickname: auction.status === 'finished' && winner ? (nicknames.get(String(winner)) || null) : null,
+    }));
     res.set("Cache-Control", "no-store");
     return res.status(200).json({
       auctions: publicAuctions,
