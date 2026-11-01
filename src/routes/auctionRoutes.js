@@ -13,6 +13,7 @@ import {
 import {
   createAuction,
   listAuctions,
+  listPublicWinners,
   getAuctionById,
   getAuctionLiveState,
   streamAuctionEvents,
@@ -23,6 +24,7 @@ const router = Router();
 
 // Listagem pública de leilões
 router.get("/", listAuctions);
+router.get("/winners", listPublicWinners);
 
 router.get(
   "/bids/by-key/:idempotencyKey",
