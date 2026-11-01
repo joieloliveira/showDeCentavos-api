@@ -1,5 +1,7 @@
 import Auction from "../models/Auction.js";
 import Product from "../models/Product.js";
+import mongoose from "mongoose";
+import AuctionAuditEvent from "../models/AuctionAuditEvent.js";
 
 const allowedStatuses = new Set(["scheduled", "active", "finished", "cancelled"]);
 
@@ -52,3 +54,17 @@ export const listAdminAuctionProducts = async (req, res) => {
     return res.status(500).json({ message: "Erro ao consultar produtos." });
   }
 };
+
+export async function listAdminAuctionEvents(req, res) {
+  try {
+    const id = req.params.id;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "ID inválido." });
+    if (!(await Auction.exists({ _id: id }))) return res.status(404).json({ message: "Leilão não encontrado." });
+    const events = await AuctionAuditEvent.find({ auction: id }).select("eventType occurredAt source createdAt").sort({ occurredAt: 1 }).limit(100).lean();
+    res.set("Cache-Control", "no-store");
+    return res.json({ events });
+  } catch (error) {
+    console.error("Falha na consulta de eventos:", error);
+    return res.status(500).json({ message: "Erro ao consultar eventos." });
+  }
+}
