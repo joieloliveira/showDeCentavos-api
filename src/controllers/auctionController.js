@@ -248,7 +248,8 @@ export const getAuctionLiveState = async (req, res) => {
       .lean();
     if (!auction) return res.status(404).json({ message: "Leilão não encontrado." });
     res.set("Cache-Control", "no-store");
-    return res.status(200).json({ auction: { ...auction, winnerNickname: await getPublicWinnerNickname(auction) }, serverTime: new Date().toISOString() });
+    const { winner, ...publicAuction } = auction;
+    return res.status(200).json({ auction: { ...publicAuction, winnerNickname: await getPublicWinnerNickname(auction) }, serverTime: new Date().toISOString() });
   } catch (error) {
     console.error("Erro ao consultar estado do leilão:", error);
     return res.status(500).json({ message: "Erro interno do servidor." });
