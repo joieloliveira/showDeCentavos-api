@@ -255,3 +255,35 @@ export const streamAuctionEvents = async (req, res) => {
     return res.status(500).json({ message: "Erro interno do servidor." });
   }
 };
+
+export const listPublicWinners = async (_req, res) => {
+  try {
+    const auctions = await Auction.find({ status: "finished", winner: { $ne: null } })
+      .select("product currentPriceCents endsAt winner")
+      .populate({ path: "product", model: Product, select: "name coverImage" })
+      .sort({ endsAt: -1 })
+      .limit(50)
+      .lean();
+    const winnerIds = [...new Set(auctions.map(a => String(a.winner)))];
+    const users = await User.find({ _id: { $in: winnerIds }, publicNickname: { $type: "string" } })
+      .select("publicNickname").lean();
+    const names = new Map(users.map(u => [String(u._id), u.publicNickname]));
+    const winners = auctions.flatMap(a => {
+      const nickname = names.get(String(a.winner));
+      if (!nickname) return [];
+      return [{
+        auctionId: String(a._id),
+        productName: a.product?.name || "Produto indisponível",
+        coverImageUrl: a.product?.coverImage?.url || null,
+        finalPriceCents: a.currentPriceCents,
+        finishedAt: a.endsAt,
+        winnerNickname: nickname,
+      }];
+    });
+    res.set("Cache-Control", "no-store");
+    return res.json({ winners });
+  } catch (error) {
+    console.error("Erro ao listar vencedores:", error);
+    return res.status(500).json({ message: "Erro interno do servidor." });
+  }
+};
