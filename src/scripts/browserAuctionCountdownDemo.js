@@ -73,6 +73,17 @@ async function main() {
     const app = express();
     app.use(cors({ origin: 'http://localhost:3000' }));
     app.use((_req, res, next) => { res.set('Cache-Control', 'no-store'); next(); });
+    // Catalog demo exposes only its own temporary auction, never test database records.
+    app.get('/api/auctions', async (_req, res) => {
+      const current = await Auction.findById(auctionId)
+        .populate('product', 'name price images coverImage').lean();
+      if (!current) return res.json({ auctions: [] });
+      const { winner, lastBidder, ...publicAuction } = current;
+      return res.json({ auctions: [{
+        ...publicAuction,
+        winnerNickname: current.status === 'finished' && winner ? demoUser.publicNickname : null,
+      }] });
+    });
     app.get('/api/auctions/:id', async (req, res) => {
       if (req.params.id !== String(auctionId)) return res.sendStatus(404);
       const current = await Auction.findById(auctionId)
@@ -128,6 +139,7 @@ async function main() {
     server = app.listen(3002, '127.0.0.1', () => {
       console.log('DEMO ONLY: http://localhost:3000/auctions/registered/' + auctionId);
       console.log('API demo: http://127.0.0.1:3002/api');
+      console.log('CATALOG DEMO: http://localhost:3000/auctions');
       console.log('Keep the browser page open, then start/restart the countdown with:');
       console.log('Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3002/demo/start');
       console.log('Press Ctrl+C to delete temporary demo records.');
