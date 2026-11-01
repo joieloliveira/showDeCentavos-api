@@ -17,7 +17,7 @@ export const listAdminAuctions = async (req, res) => {
       return res.status(400).json({ message: "Situação do leilão inválida." });
     }
     const filter = status ? { status } : {};
-    const [total, auctions] = await Promise.all([
+    const [total, auctions, statusGroups] = await Promise.all([
       Auction.countDocuments(filter),
       Auction.find(filter)
         .select("product startPriceCents currentPriceCents bidCostCents bidIncrementCents bidCount durationSeconds waitingMinutes waitingStartedAt startsAt endsAt status createdAt updatedAt")
@@ -26,9 +26,11 @@ export const listAdminAuctions = async (req, res) => {
         .skip((page - 1) * limit)
         .limit(limit)
         .lean(),
+      Auction.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
     ]);
     return res.status(200).json({
       auctions,
+      statusCounts: Object.fromEntries(["scheduled", "active", "finished", "cancelled"].map(s => [s, statusGroups.find(g => g._id === s)?.count ?? 0])),
       pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
     });
   } catch (error) {
