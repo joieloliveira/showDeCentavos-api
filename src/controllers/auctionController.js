@@ -2,6 +2,7 @@ import { subscribeAuctionEvents } from "../services/AuctionEventsService.js";
 
 import mongoose from "mongoose";
 import Auction from "../models/Auction.js";
+import { recordAuctionAuditEvent } from "../services/AuctionAuditService.js";
 import Product from "../models/Product.js";
 import User from "../models/User.js";
 
@@ -67,6 +68,7 @@ export const createAuction = async (req, res) => {
       status: "scheduled",
     });
 
+    await recordAuctionAuditEvent(auction._id, "created", auction.createdAt, "admin", req.user?._id ?? req.user?.id ?? null);
     return res.status(201).json({
       message: "Leilão cadastrado com sucesso.",
       auction,
@@ -223,6 +225,7 @@ export const startAuctionWaiting = async (req, res) => {
       });
     }
 
+    await recordAuctionAuditEvent(updatedAuction._id, "waiting_started", now, "admin", req.user?._id ?? req.user?.id ?? null);
     return res.status(200).json({
       message: "Contagem de espera iniciada com sucesso.",
       auction: updatedAuction,
