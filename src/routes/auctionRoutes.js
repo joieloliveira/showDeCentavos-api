@@ -149,7 +149,7 @@ router.put("/my/wins/:auctionId/address", auth, async (req, res) => {
           winningPriceCents: auction.currentPriceCents, wonAt: auction.endsAt
         }
       },
-      { upsert: !existing, new: true, runValidators: true, setDefaultsOnInsert: true }
+      { upsert: !existing, returnDocument: "after", runValidators: true, setDefaultsOnInsert: true }
     );
     if (!record) return res.status(409).json({ message: "Não foi possível atualizar este endereço." });
     res.set("Cache-Control", "no-store");
