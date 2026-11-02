@@ -68,6 +68,41 @@ router.get("/my/participations", auth, async (req, res) => {
   }
 });
 
+// Vitórias confirmadas do usuário, sem inferir pagamento ou entrega.
+router.get("/my/wins", auth, async (req, res) => {
+  try {
+    const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.page, 10) || 1));
+    const limit = 20;
+    const filter = { winner: req.user.id, status: "finished" };
+    const [total, auctions] = await Promise.all([
+      Auction.countDocuments(filter),
+      Auction.find(filter)
+        .select("product currentPriceCents endsAt bidCount")
+        .populate("product", "name coverImage images")
+        .sort({ endsAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean()
+    ]);
+    res.set("Cache-Control", "no-store");
+    return res.json({
+      page, limit, total,
+      items: auctions.map(auction => ({
+        auctionId: String(auction._id),
+        productName: auction.product?.name || "Produto indisponível",
+        coverImageUrl: auction.product?.coverImage?.url || auction.product?.images?.[0]?.url || null,
+        finalPriceCents: auction.currentPriceCents,
+        finishedAt: auction.endsAt,
+        bidCount: auction.bidCount,
+        fulfillmentStatus: "not_available"
+      }))
+    });
+  } catch (error) {
+    console.error("Erro ao consultar vitórias:", error);
+    return res.status(500).json({ message: "Não foi possível consultar suas vitórias." });
+  }
+});
+
 // Listagem pública de leilões
 router.get("/", listAuctions);
 router.get("/winners", listPublicWinners);
