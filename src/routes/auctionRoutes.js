@@ -90,7 +90,7 @@ router.get("/my/wins", auth, async (req, res) => {
     const fulfillmentRecords = await AuctionFulfillment.find({
       auction: { $in: auctions.map(auction => auction._id) },
       winner: req.user.id
-    }).select("auction paymentStatus deliveryStatus").lean();
+    }).select("auction paymentStatus deliveryStatus shippingAddress addressSubmittedAt").lean();
     const fulfillmentByAuction = new Map(fulfillmentRecords.map(record => [String(record.auction), record]));
     res.set("Cache-Control", "no-store");
     return res.json({
@@ -104,6 +104,9 @@ router.get("/my/wins", auth, async (req, res) => {
         bidCount: auction.bidCount,
         paymentStatus: fulfillmentByAuction.get(String(auction._id))?.paymentStatus || "not_started",
         deliveryStatus: fulfillmentByAuction.get(String(auction._id))?.deliveryStatus || "not_started",
+        shippingAddress: fulfillmentByAuction.get(String(auction._id))?.shippingAddress ?? null,
+        addressSubmittedAt: fulfillmentByAuction.get(String(auction._id))?.addressSubmittedAt ?? null,
+        addressEditable: (fulfillmentByAuction.get(String(auction._id))?.deliveryStatus ?? "not_started") === "not_started",
         fulfillmentAvailable: false
       }))
     });
