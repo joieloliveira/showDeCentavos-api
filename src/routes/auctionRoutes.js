@@ -6,6 +6,7 @@ import Bid from "../models/Bid.js";
 import Auction from "../models/Auction.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
 import { validateAuctionShippingAddress } from "../services/auctionShippingAddress.js";
+import { addressWriteDecision } from "../services/auctionAddressPolicy.js";
 import isAdmin from "../middlewares/isAdmin.js";
 
 import {
@@ -128,16 +129,16 @@ router.put("/my/wins/:auctionId/address", auth, async (req, res) => {
     } catch (error) {
       return res.status(400).json({ message: error.message });
     }
-    const auction = await Auction.findOne({
-      _id: req.params.auctionId, winner: req.user.id, status: "finished"
-    }).select("_id product winner currentPriceCents endsAt").lean();
-    if (!auction) return res.status(404).json({ message: "Vitória não encontrada." });
-    const existing = await AuctionFulfillment.findOne({ auction: auction._id }).select("winner deliveryStatus");
-    if (existing && String(existing.winner) !== String(req.user.id)) {
-      return res.status(403).json({ message: "Arremate indisponível." });
-    }
-    if (existing && existing.deliveryStatus !== "not_started") {
-      return res.status(409).json({ message: "Endereço bloqueado após início da entrega." });
+    const auction = await Auction.findById(req.params.auctionId)
+      .select("_id product winner currentPriceCents endsAt status").lean();
+    const existing = auction ? await AuctionFulfillment.findOne({ auction: auction._id })
+      .select("winner deliveryStatus").lean() : null;
+    const decision = addressWriteDecision({
+      featureEnabled: true, authenticatedUserId: req.user.id, auction, fulfillment: existing
+    });
+    if (decision.status !== 200) return res.status(decision.status).json({ message: decision.message });
+    if (!auction.product || !auction.endsAt) {
+      return res.status(409).json({ message: "Dados do arremate incompletos." });
     }
     const record = await AuctionFulfillment.findOneAndUpdate(
       { auction: auction._id, winner: req.user.id, deliveryStatus: "not_started" },
@@ -148,7 +149,7 @@ router.put("/my/wins/:auctionId/address", auth, async (req, res) => {
           winningPriceCents: auction.currentPriceCents, wonAt: auction.endsAt
         }
       },
-      { upsert: !existing, new: true, runValidators: true }
+      { upsert: !existing, new: true, runValidators: true, setDefaultsOnInsert: true }
     );
     if (!record) return res.status(409).json({ message: "Não foi possível atualizar este endereço." });
     res.set("Cache-Control", "no-store");
