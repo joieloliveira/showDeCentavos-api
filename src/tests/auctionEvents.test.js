@@ -54,3 +54,20 @@ test('SSE rejects slow consumers to avoid unlimited response buffering', () => {
   assert.equal(res.writableEnded, true);
   req.emit('close');
 });
+
+test('SSE reconnects with a fresh subscriber and receives subsequent updates', () => {
+  const auctionId = 'reconnect-' + Math.random().toString(36).slice(2);
+  const first = client();
+  subscribeAuctionEvents(first.req, first.res, auctionId);
+  first.req.emit('close');
+  const second = client();
+  try {
+    subscribeAuctionEvents(second.req, second.res, auctionId);
+    publishAuctionEvent(auctionId, { status: 'active' });
+    assert.equal(first.res.frames.length, 1);
+    assert.equal(second.res.frames.length, 2);
+    assert.match(second.res.frames[1], /^event: auction-update\\n/);
+  } finally {
+    second.req.emit('close');
+  }
+});
