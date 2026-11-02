@@ -4,6 +4,7 @@ import { Router } from "express";
 import auth from "../middlewares/auth.js";
 import Bid from "../models/Bid.js";
 import Auction from "../models/Auction.js";
+import AuctionFulfillment from "../models/AuctionFulfillment.js";
 import isAdmin from "../middlewares/isAdmin.js";
 
 import {
@@ -84,6 +85,11 @@ router.get("/my/wins", auth, async (req, res) => {
         .limit(limit)
         .lean()
     ]);
+    const fulfillmentRecords = await AuctionFulfillment.find({
+      auction: { $in: auctions.map(auction => auction._id) },
+      winner: req.user.id
+    }).select("auction paymentStatus deliveryStatus").lean();
+    const fulfillmentByAuction = new Map(fulfillmentRecords.map(record => [String(record.auction), record]));
     res.set("Cache-Control", "no-store");
     return res.json({
       page, limit, total,
@@ -94,7 +100,9 @@ router.get("/my/wins", auth, async (req, res) => {
         finalPriceCents: auction.currentPriceCents,
         finishedAt: auction.endsAt,
         bidCount: auction.bidCount,
-        fulfillmentStatus: "not_available"
+        paymentStatus: fulfillmentByAuction.get(String(auction._id))?.paymentStatus || "not_started",
+        deliveryStatus: fulfillmentByAuction.get(String(auction._id))?.deliveryStatus || "not_started",
+        fulfillmentAvailable: false
       }))
     });
   } catch (error) {
