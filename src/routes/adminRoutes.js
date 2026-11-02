@@ -6,7 +6,7 @@ import { uploadProductImages, deleteProductImage, setProductCover } from "../con
 import { listAdminProducts, createAdminProduct, updateAdminProduct } from "../controllers/adminProductController.js";
 import { listAdminAuctions, listAdminAuctionProducts, listAdminAuctionEvents } from "../controllers/adminAuctionController.js";
 import isAdmin from "../middlewares/isAdmin.js";
-import { listAdminAuctionBids } from "../controllers/adminAuctionBidHistoryController.js";
+import { listAdminAuctionBids, getAdminAuctionBidReconciliationSummary } from "../controllers/adminAuctionBidHistoryController.js";
 import { listAdminWalletIncidents, getAdminWalletIncident } from "../controllers/adminWalletIncidentController.js";
 
 import {
@@ -27,6 +27,7 @@ router.get("/auctions/products", auth, isAdmin, listAdminAuctionProducts);
 router.get("/auctions", auth, isAdmin, listAdminAuctions);
 router.get("/auctions/:id/events", auth, isAdmin, listAdminAuctionEvents);
 router.get("/auctions/:id/bids", auth, isAdmin, listAdminAuctionBids);
+router.get("/auctions/:id/bids/summary", auth, isAdmin, getAdminAuctionBidReconciliationSummary);
 
 router.get("/wallet/incidents", auth, isAdmin, listAdminWalletIncidents);
 router.get("/wallet/incidents/:incidentId", auth, isAdmin, getAdminWalletIncident);
