@@ -44,3 +44,52 @@ export async function listAdminAuctionBids(req, res) {
     return res.status(500).json({ message: "Erro ao consultar lances." });
   }
 }
+
+export async function getAdminAuctionBidReconciliationSummary(req, res) {
+  try {
+    const { id } = req.params;
+    if (!mongoose.isValidObjectId(id)) return res.status(400).json({ message: "ID inválido." });
+    if (!(await Auction.exists({ _id: id }))) return res.status(404).json({ message: "Leilão não encontrado." });
+    const [summary] = await Bid.aggregate([
+      { $match: { auction: new mongoose.Types.ObjectId(id) } },
+      { $lookup: {
+        from: WalletTransaction.collection.name,
+        let: { bidId: "$_id" },
+        pipeline: [
+          { $match: { $expr: { $eq: ["$bid", "$$bidId"] }, type: "bid" } },
+          { $project: { user: 1, auction: 1, amountCents: 1, balanceAfterCents: 1 } },
+        ],
+        as: "ledger",
+      } },
+      { $project: {
+        status: { $cond: [
+          { $eq: [{ $size: "$ledger" }, 0] }, "missing",
+          { $cond: [
+            { $and: [
+              { $eq: [{ $size: "$ledger" }, 1] },
+              { $eq: [{ $arrayElemAt: ["$ledger.user", 0] }, "$user"] },
+              { $eq: [{ $arrayElemAt: ["$ledger.auction", 0] }, "$auction"] },
+              { $eq: [{ $arrayElemAt: ["$ledger.amountCents", 0] }, { $multiply: ["$bidCostCents", -1] }] },
+              { $eq: [{ $arrayElemAt: ["$ledger.balanceAfterCents", 0] }, "$balanceAfterCents"] },
+            ] }, "matched", "mismatch",
+          ] },
+        ] },
+        bidCostCents: 1,
+      } },
+      { $group: {
+        _id: null, total: { $sum: 1 },
+        matched: { $sum: { $cond: [{ $eq: ["$status", "matched"] }, 1, 0] } },
+        missing: { $sum: { $cond: [{ $eq: ["$status", "missing"] }, 1, 0] } },
+        mismatch: { $sum: { $cond: [{ $eq: ["$status", "mismatch"] }, 1, 0] } },
+      } },
+    ]);
+    res.set("Cache-Control", "no-store");
+    return res.json({ summary: {
+      total: summary?.total ?? 0, matched: summary?.matched ?? 0,
+      missing: summary?.missing ?? 0, mismatch: summary?.mismatch ?? 0,
+    } });
+  } catch (error) {
+    console.error("Erro no resumo de conciliação dos lances:", error);
+    return res.status(500).json({ message: "Erro ao consultar conciliação." });
+  }
+}
