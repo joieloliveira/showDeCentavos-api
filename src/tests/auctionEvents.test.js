@@ -66,7 +66,7 @@ test('SSE reconnects with a fresh subscriber and receives subsequent updates', (
     publishAuctionEvent(auctionId, { status: 'active' });
     assert.equal(first.res.frames.length, 1);
     assert.equal(second.res.frames.length, 2);
-    assert.match(second.res.frames[1], /^event: auction-update\\n/);
+    assert.match(second.res.frames[1], /^event: auction-update\n/);
   } finally {
     second.req.emit('close');
   }
