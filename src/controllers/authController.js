@@ -282,9 +282,11 @@ export const googleLogin = async (req, res) => {
       .trim()
       .toLowerCase();
 
+    // googleId is select:false in User; explicitly load it to prevent
+    // replacing an existing Google account binding with a different subject.
     let user = await User.findOne({
       email,
-    });
+    }).select('+googleId');
 
     if (user) {
       if (
