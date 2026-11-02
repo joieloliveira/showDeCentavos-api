@@ -1,7 +1,7 @@
 const required = {
   recipientName: 120,
   phone: 20,
-  zipCode: 8,
+  zipCode: 9,
   street: 160,
   number: 20,
   neighborhood: 100,
