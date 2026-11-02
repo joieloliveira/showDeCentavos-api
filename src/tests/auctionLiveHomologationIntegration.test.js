@@ -65,3 +65,41 @@ integration("synthetic timed auction finishes and live endpoint shows final resu
   assert.equal(await Bid.countDocuments(), 0);
   assert.equal(await WalletTransaction.countDocuments({ type: "bid" }), 0);
 });
+
+integration("SSE broadcasts scheduler activation to a connected browser client", async () => {
+  const auction = await Auction.create({
+    product: new mongoose.Types.ObjectId(),
+    status: "scheduled",
+    bidCostCents: 50,
+    waitingStartedAt: new Date(Date.now() - 90000),
+    startsAt: new Date(Date.now() - 30000)
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  let reader;
+  try {
+    const response = await fetch(`${base}/api/auctions/${auction._id}/events`, {
+      signal: controller.signal,
+      headers: { Accept: "text/event-stream" }
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") || "", /text\/event-stream/);
+    reader = response.body.getReader();
+    const initial = new TextDecoder().decode((await reader.read()).value);
+    assert.match(initial, /: connected/);
+    await processAuctionSchedules();
+    let received = "";
+    while (!received.includes("\\n\\n") && !received.includes("auction-update")) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      received += new TextDecoder().decode(chunk.value);
+    }
+    assert.match(received, /event: auction-update/);
+    assert.match(received, /"status":"active"/);
+    assert.equal((await Auction.findById(auction._id)).status, "active");
+  } finally {
+    controller.abort();
+    clearTimeout(timeout);
+    if (reader) await reader.cancel().catch(() => {});
+  }
+});
