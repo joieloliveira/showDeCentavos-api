@@ -5,6 +5,7 @@ import auth from "../middlewares/auth.js";
 import Bid from "../models/Bid.js";
 import Auction from "../models/Auction.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
+import { validateAuctionShippingAddress } from "../services/auctionShippingAddress.js";
 import isAdmin from "../middlewares/isAdmin.js";
 
 import {
@@ -108,6 +109,54 @@ router.get("/my/wins", auth, async (req, res) => {
   } catch (error) {
     console.error("Erro ao consultar vitórias:", error);
     return res.status(500).json({ message: "Não foi possível consultar suas vitórias." });
+  }
+});
+
+// Save an address only for an authenticated winner; never change payment or shipping states.
+router.put("/my/wins/:auctionId/address", auth, async (req, res) => {
+  if (process.env.AUCTION_ADDRESS_COLLECTION_ENABLED !== "true") {
+    return res.status(503).json({ message: "Cadastro de endereço de arremate ainda não habilitado." });
+  }
+  try {
+    const mongoose = (await import("mongoose")).default;
+    if (!mongoose.isValidObjectId(req.params.auctionId)) {
+      return res.status(400).json({ message: "Identificador de leilão inválido." });
+    }
+    let address;
+    try {
+      address = validateAuctionShippingAddress(req.body);
+    } catch (error) {
+      return res.status(400).json({ message: error.message });
+    }
+    const auction = await Auction.findOne({
+      _id: req.params.auctionId, winner: req.user.id, status: "finished"
+    }).select("_id product winner currentPriceCents endsAt").lean();
+    if (!auction) return res.status(404).json({ message: "Vitória não encontrada." });
+    const existing = await AuctionFulfillment.findOne({ auction: auction._id }).select("winner deliveryStatus");
+    if (existing && String(existing.winner) !== String(req.user.id)) {
+      return res.status(403).json({ message: "Arremate indisponível." });
+    }
+    if (existing && existing.deliveryStatus !== "not_started") {
+      return res.status(409).json({ message: "Endereço bloqueado após início da entrega." });
+    }
+    const record = await AuctionFulfillment.findOneAndUpdate(
+      { auction: auction._id, winner: req.user.id, deliveryStatus: "not_started" },
+      {
+        $set: { shippingAddress: address, addressSubmittedAt: new Date() },
+        $setOnInsert: {
+          auction: auction._id, winner: auction.winner, product: auction.product,
+          winningPriceCents: auction.currentPriceCents, wonAt: auction.endsAt
+        }
+      },
+      { upsert: !existing, new: true, runValidators: true }
+    );
+    if (!record) return res.status(409).json({ message: "Não foi possível atualizar este endereço." });
+    res.set("Cache-Control", "no-store");
+    return res.json({ message: "Endereço salvo.", shippingAddress: record.shippingAddress });
+  } catch (error) {
+    if (error.code === 11000) return res.status(409).json({ message: "Arremate atualizado simultaneamente. Tente novamente." });
+    console.error("Erro ao salvar endereço do arremate:", error);
+    return res.status(500).json({ message: "Não foi possível salvar o endereço." });
   }
 });
 
