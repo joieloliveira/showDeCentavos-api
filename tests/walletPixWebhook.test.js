@@ -123,3 +123,28 @@ test("refund webhook creates an incident for manual review", async (t) => {
   assert.equal(res.code, 200);
   assert.equal(incident.mock.callCount(), 1);
 });
+
+test("chargeback webhook creates an incident for manual review", async (t) => {
+  withSecret(t);
+  mock.method(WebhookSignatureValidator, "validate", () => {});
+  mock.method(MercadoPagoProvider, "getOrder", async () => ({
+    orderId, externalReference: id, normalizedStatus: "charged_back",
+  }));
+  mock.method(WalletDeposit, "findOne", async () => ({
+    _id: id, user: "507f1f77bcf86cd799439012",
+    provider: "mercadopago", providerOrderId: orderId,
+  }));
+  mock.method(WalletDeposit, "findOneAndUpdate", async () => ({
+    _id: id, user: "507f1f77bcf86cd799439012",
+    provider: "mercadopago", providerOrderId: orderId,
+  }));
+  const incident = mock.method(WalletPaymentIncident, "findOneAndUpdate", async (filter, changes) => {
+    assert.equal(filter.providerStatus, "charged_back");
+    assert.equal(changes.$setOnInsert.resolution, "review_required");
+    return { ...filter };
+  });
+  const res = makeResponse();
+  await walletPixWebhook(makeRequest(), res);
+  assert.equal(res.code, 200);
+  assert.equal(incident.mock.callCount(), 1);
+});
