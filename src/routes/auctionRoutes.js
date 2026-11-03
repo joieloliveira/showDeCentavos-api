@@ -5,6 +5,7 @@ import auth from "../middlewares/auth.js";
 import Bid from "../models/Bid.js";
 import Auction from "../models/Auction.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
+import AuctionDeliveryAuditEvent from "../models/AuctionDeliveryAuditEvent.js";
 import { validateAuctionShippingAddress } from "../services/auctionShippingAddress.js";
 import { addressWriteDecision } from "../services/auctionAddressPolicy.js";
 import { calculatePaymentDeadline, paymentWindowState, canPrepareDelivery, canMarkDelivered } from "../services/auctionFulfillmentRules.js";
@@ -262,6 +263,16 @@ router.patch("/admin/fulfillments/:auctionId/delivery", auth, isAdmin, async (re
       { returnDocument: "after", runValidators: true }
     ).select("auction paymentStatus deliveryStatus");
     if (!updated) return res.status(409).json({ message: "Arremate alterado simultaneamente." });
+    try {
+      await AuctionDeliveryAuditEvent.create({
+        auction: updated.auction, actor: req.user.id,
+        fromStatus: previous, toStatus: target, occurredAt: new Date()
+      });
+    } catch (auditError) {
+      // The delivery transition already committed. Surface the audit failure for operations.
+      console.error("ALERTA: transição de entrega sem auditoria persistida:", String(updated.auction), target, auditError);
+      return res.status(500).json({ message: "Entrega atualizada, mas o registro de auditoria falhou. Verifique o estado antes de tentar novamente." });
+    }
     res.set("Cache-Control", "no-store");
     return res.json({ auctionId: String(updated.auction), paymentStatus: updated.paymentStatus,
       deliveryStatus: updated.deliveryStatus });
