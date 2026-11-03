@@ -27,6 +27,8 @@ export const walletPixWebhook = async (req, res) => {
     if (orderId.startsWith("PAY")) return res.sendStatus(200);
 
     const providerOrder = await MercadoPagoProvider.getOrder(orderId);
+    // Never associate a signed notification with a different remote order.
+    if (providerOrder.orderId !== orderId) return res.sendStatus(500);
     if (!mongoose.isObjectIdOrHexString(providerOrder.externalReference)) {
       return res.sendStatus(200);
     }
