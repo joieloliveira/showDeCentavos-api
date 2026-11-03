@@ -48,6 +48,7 @@ router.get("/my/participations", auth, async (req, res) => {
       .select("product status currentPriceCents winner endsAt startsAt")
       .populate("product", "name title images").lean();
     const byId = new Map(auctions.map(a => [String(a._id), a]));
+    res.set("Cache-Control", "no-store");
     return res.json({
       page, limit, total: totalGroups.length,
       items: groups.map(g => {
