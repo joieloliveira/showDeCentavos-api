@@ -109,3 +109,16 @@ integration("concurrent delivery requests accept only one transition per stage",
     assert.equal(audit[0].fromStatus, target === "preparing" ? "not_started" : target === "shipped" ? "preparing" : "shipped");
   }
 });
+
+integration("failed audit insert rolls back delivery status atomically", async () => {
+  await AuctionFulfillment.updateOne(
+    { auction: auctionId }, { $set: { deliveryStatus: "not_started" } }
+  );
+  const existing = await AuctionDeliveryAuditEvent.findOne({ auction: auctionId, toStatus: "preparing" });
+  assert.ok(existing, "prior successful transition must have an audit record");
+  const result = await patch(admin, "preparing");
+  assert.equal(result.status, 500, "duplicate audit must reject the entire transaction");
+  const record = await AuctionFulfillment.findOne({ auction: auctionId }).lean();
+  assert.equal(record.deliveryStatus, "not_started", "delivery update must roll back");
+  assert.equal(await AuctionDeliveryAuditEvent.countDocuments({ auction: auctionId, toStatus: "preparing" }), 1);
+});
