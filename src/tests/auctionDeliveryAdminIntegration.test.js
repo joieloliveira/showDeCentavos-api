@@ -117,7 +117,7 @@ integration("failed audit insert rolls back delivery status atomically", async (
   const existing = await AuctionDeliveryAuditEvent.findOne({ auction: auctionId, toStatus: "preparing" });
   assert.ok(existing, "prior successful transition must have an audit record");
   const result = await patch(admin, "preparing");
-  assert.equal(result.status, 500, "duplicate audit must reject the entire transaction");
+  assert.equal(result.status, 409, "duplicate audit must reject the entire transaction as a conflict");
   const record = await AuctionFulfillment.findOne({ auction: auctionId }).lean();
   assert.equal(record.deliveryStatus, "not_started", "delivery update must roll back");
   assert.equal(await AuctionDeliveryAuditEvent.countDocuments({ auction: auctionId, toStatus: "preparing" }), 1);
