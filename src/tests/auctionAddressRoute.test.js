@@ -38,6 +38,7 @@ if (safe) {
       dbName: `auction_address_route_test_${process.pid}_${Date.now()}`,
       serverSelectionTimeoutMS: 5000
     });
+    await AuctionFulfillment.createIndexes();
     winner = await User.create({ name: "Address Winner", email: `address-winner-${Date.now()}@example.test`, isActive: true });
     outsider = await User.create({ name: "Address Outsider", email: `address-outsider-${Date.now()}@example.test`, isActive: true });
     auction = await Auction.create({
@@ -134,4 +135,29 @@ integration("saving an address does not permit another user to overwrite it", as
     assert.equal(afterRecord.shippingAddress.number, before.shippingAddress.number);
     assert.equal(await AuctionFulfillment.countDocuments({ auction: auction._id }), 1);
   } finally { process.env.AUCTION_ADDRESS_COLLECTION_ENABLED = "false"; }
+});
+
+integration("simultaneous address submissions cannot create duplicate fulfillment records", async () => {
+  await AuctionFulfillment.deleteMany({ auction: auction._id });
+  process.env.AUCTION_ADDRESS_COLLECTION_ENABLED = "true";
+  try {
+    const requests = await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        put(token(winner._id), { ...address, number: String(100 + index) })
+      )
+    );
+    assert.ok(requests.some(result => result.response.status === 200), "at least one write must succeed");
+    assert.ok(
+      requests.every(result => [200, 409].includes(result.response.status)),
+      JSON.stringify(requests.map(result => ({ status: result.response.status, body: result.body })))
+    );
+    const records = await AuctionFulfillment.find({ auction: auction._id }).lean();
+    assert.equal(records.length, 1, "unique auction fulfillment must survive concurrent upserts");
+    assert.equal(String(records[0].winner), String(winner._id));
+    assert.ok(["100", "101", "102", "103", "104", "105"].includes(records[0].shippingAddress.number));
+    assert.equal(records[0].paymentStatus, "not_started");
+    assert.equal(records[0].deliveryStatus, "not_started");
+  } finally {
+    process.env.AUCTION_ADDRESS_COLLECTION_ENABLED = "false";
+  }
 });
