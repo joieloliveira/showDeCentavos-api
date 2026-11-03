@@ -6,6 +6,7 @@ import { uploadProductImages, deleteProductImage, setProductCover } from "../con
 import { listAdminProducts, createAdminProduct, updateAdminProduct } from "../controllers/adminProductController.js";
 import { listAdminAuctions, listAdminAuctionProducts, listAdminAuctionEvents } from "../controllers/adminAuctionController.js";
 import isAdmin from "../middlewares/isAdmin.js";
+import { getAuctionOperationsSummary } from "../controllers/adminAuctionOperationsController.js";
 import { listAdminAuctionBids, getAdminAuctionBidReconciliationSummary } from "../controllers/adminAuctionBidHistoryController.js";
 import { listAdminWalletIncidents, getAdminWalletIncident } from "../controllers/adminWalletIncidentController.js";
 
@@ -23,6 +24,7 @@ router.patch("/products/:id", auth, isAdmin, updateAdminProduct);
 router.post("/products/:id/images", auth, isAdmin, upload.array("images", 8), uploadProductImages);
 router.delete("/products/:id/images", auth, isAdmin, deleteProductImage);
 router.put("/products/:id/cover", auth, isAdmin, setProductCover);
+router.get("/auctions/operations-summary", auth, isAdmin, getAuctionOperationsSummary);
 router.get("/auctions/products", auth, isAdmin, listAdminAuctionProducts);
 router.get("/auctions", auth, isAdmin, listAdminAuctions);
 router.get("/auctions/:id/events", auth, isAdmin, listAdminAuctionEvents);
