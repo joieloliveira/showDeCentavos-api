@@ -186,3 +186,50 @@ integration("financial audit reconciles every bid, ledger debit and final wallet
   assert.equal(user.wallet.balanceCents, 100 + totalDebits);
   assert.ok(user.wallet.balanceCents >= 0);
 });
+
+integration("replaying a committed key after a lost response never charges again", async () => {
+  const existing = await Bid.findOne({ auction: auctionId, user: userId }).lean();
+  assert.ok(existing);
+  const before = {
+    balance: (await User.findById(userId)).wallet.balanceCents,
+    bids: await Bid.countDocuments({ auction: auctionId }),
+    debits: await WalletTransaction.countDocuments({ auction: auctionId, type: "bid" }),
+    auction: await Auction.findById(auctionId).lean()
+  };
+  // Simulate a client that did not receive the original HTTP response and
+  // retries with exactly the same UUID, even after funds are exhausted.
+  const response = await bid(existing.idempotencyKey);
+  assert.equal(response.status, 200);
+  assert.equal(response.body.duplicate, true);
+  assert.equal(String(response.body.bid._id), String(existing._id));
+  assert.equal((await User.findById(userId)).wallet.balanceCents, before.balance);
+  assert.equal(await Bid.countDocuments({ auction: auctionId }), before.bids);
+  assert.equal(await WalletTransaction.countDocuments({ auction: auctionId, type: "bid" }), before.debits);
+  const after = await Auction.findById(auctionId).lean();
+  assert.equal(after.bidCount, before.auction.bidCount);
+  assert.equal(after.currentPriceCents, before.auction.currentPriceCents);
+  assert.equal(after.endsAt?.getTime(), before.auction.endsAt?.getTime());
+});
+integration("a committed idempotency key cannot be reused on another auction", async () => {
+  const existing = await Bid.findOne({ auction: auctionId, user: userId }).lean();
+  assert.ok(existing);
+  const otherAuction = await Auction.create({
+    product: new mongoose.Types.ObjectId(), status: "active",
+    bidCostCents: 50, bidIncrementCents: 1,
+    startsAt: new Date(Date.now() - 60000)
+  });
+  try {
+    const beforeBalance = (await User.findById(userId)).wallet.balanceCents;
+    const response = await fetch(`${base}/api/auctions/${otherAuction._id}/bids`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${token()}` },
+      body: JSON.stringify({ idempotencyKey: existing.idempotencyKey })
+    });
+    assert.equal(response.status, 409);
+    assert.equal(await Bid.countDocuments({ auction: otherAuction._id }), 0);
+    assert.equal(await WalletTransaction.countDocuments({ auction: otherAuction._id, type: "bid" }), 0);
+    assert.equal((await User.findById(userId)).wallet.balanceCents, beforeBalance);
+  } finally {
+    await Auction.deleteOne({ _id: otherAuction._id });
+  }
+});
