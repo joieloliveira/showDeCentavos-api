@@ -4,11 +4,17 @@ import WalletPaymentIncident from "../models/WalletPaymentIncident.js";
 
 export async function getAuctionOperationsSummary(req, res) {
   try {
-    const [auctionStatuses, paymentStatuses, deliveryStatuses, incidentsRequiringReview] = await Promise.all([
+    const overdueCutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+    const [auctionStatuses, paymentStatuses, deliveryStatuses, incidentsRequiringReview, overduePayments, readyForPreparation, awaitingAddress, preparingDeliveries, shippedDeliveries] = await Promise.all([
       Auction.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
       AuctionFulfillment.aggregate([{ $group: { _id: "$paymentStatus", count: { $sum: 1 } } }]),
       AuctionFulfillment.aggregate([{ $group: { _id: "$deliveryStatus", count: { $sum: 1 } } }]),
-      WalletPaymentIncident.countDocuments({ resolution: "review_required" })
+      WalletPaymentIncident.countDocuments({ resolution: "review_required" }),
+      AuctionFulfillment.countDocuments({ paymentStatus: { $in: ["not_started", "pending", "failed"] }, wonAt: { $lt: overdueCutoff } }),
+      AuctionFulfillment.countDocuments({ paymentStatus: "paid", deliveryStatus: "not_started", addressSubmittedAt: { $ne: null } }),
+      AuctionFulfillment.countDocuments({ paymentStatus: "paid", deliveryStatus: "not_started", addressSubmittedAt: null }),
+      AuctionFulfillment.countDocuments({ deliveryStatus: "preparing" }),
+      AuctionFulfillment.countDocuments({ deliveryStatus: "shipped" })
     ]);
     const counts = (rows, keys) => Object.fromEntries(keys.map(key => [key, rows.find(row => row._id === key)?.count || 0]));
     res.set("Cache-Control", "no-store");
@@ -16,7 +22,8 @@ export async function getAuctionOperationsSummary(req, res) {
       auctions: counts(auctionStatuses, ["scheduled", "active", "finished", "cancelled"]),
       payments: counts(paymentStatuses, ["not_started", "pending", "paid", "failed", "refunded", "cancelled"]),
       deliveries: counts(deliveryStatuses, ["not_started", "preparing", "shipped", "delivered", "cancelled"]),
-      incidentsRequiringReview
+      incidentsRequiringReview,
+      fulfillmentAlerts: { overduePayments, readyForPreparation, awaitingAddress, preparingDeliveries, shippedDeliveries }
     });
   } catch (error) {
     console.error("Erro ao consultar indicadores operacionais:", error);
