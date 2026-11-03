@@ -97,3 +97,22 @@ test("webhook rejects a provider response for a different order", async (t) => {
   assert.equal(res.code, 500);
   assert.equal(lookup.mock.callCount(), 0);
 });
+
+test("refund webhook creates an incident for manual review", async (t) => {
+  withSecret(t);
+  mock.method(WebhookSignatureValidator, "validate", () => {});
+  mock.method(MercadoPagoProvider, "getOrder", async () => ({
+    orderId, externalReference: id, normalizedStatus: "refunded",
+  }));
+  mock.method(WalletDeposit, "findOne", async () => ({
+    _id: id, user: "507f1f77bcf86cd799439012",
+    provider: "mercadopago", providerOrderId: orderId,
+  }));
+  mock.method(WalletDeposit, "findOneAndUpdate", async () => ({
+    _id: id, user: "507f1f77bcf86cd799439012",
+    provider: "mercadopago", providerOrderId: orderId,
+  }));
+  const res = makeResponse();
+  await walletPixWebhook(makeRequest(), res);
+  assert.equal(res.code, 500);
+});
