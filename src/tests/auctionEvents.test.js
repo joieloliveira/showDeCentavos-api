@@ -71,3 +71,29 @@ test('SSE reconnects with a fresh subscriber and receives subsequent updates', (
     second.req.emit('close');
   }
 });
+
+
+test('SSE disconnects stalled subscribers on heartbeat backpressure', () => {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  let tick;
+  globalThis.setInterval = callback => {
+    tick = callback;
+    return { unref() {} };
+  };
+  globalThis.clearInterval = () => {};
+  const auctionId = 'heartbeat-' + Math.random().toString(36).slice(2);
+  const { req, res } = client();
+  try {
+    subscribeAuctionEvents(req, res, auctionId);
+    res.write = frame => !frame.startsWith(': heartbeat');
+    tick();
+    assert.equal(res.writableEnded, true);
+    publishAuctionEvent(auctionId, { status: 'active' });
+    assert.equal(res.frames.length, 1);
+  } finally {
+    req.emit('close');
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
