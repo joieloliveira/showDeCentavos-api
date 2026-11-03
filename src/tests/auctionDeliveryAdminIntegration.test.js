@@ -68,6 +68,14 @@ integration("delivery cannot begin without confirmed payment and winner address"
   await AuctionFulfillment.updateOne({ auction: auctionId }, { $set: { paymentStatus: "paid" } });
   assert.equal((await patch(admin, "preparing")).status, 409);
   await AuctionFulfillment.updateOne({ auction: auctionId }, { $set: { addressSubmittedAt: new Date() } });
+  assert.equal((await patch(admin, "preparing")).status, 409, "timestamp alone is not an address");
+  await AuctionFulfillment.updateOne({ auction: auctionId }, { $set: {
+    shippingAddress: {
+      recipientName: "Winner", phone: "91999999999", zipCode: "66000000",
+      street: "Test Street", number: "10", neighborhood: "Center",
+      city: "Belem", state: "PA", country: "BR"
+    }
+  } });
 });
 integration("admin advances delivery in order, rejecting skips and duplicate transitions", async () => {
   assert.equal((await patch(admin, "shipped")).status, 409);
