@@ -92,10 +92,14 @@ integration("wins history exposes recorded fulfillment states but never implies 
   const recorded = body.items.find(x => x.auctionId === String(auctions[0]._id));
   const untouched = body.items.find(x => x.auctionId === String(auctions[1]._id));
   assert.equal(recorded.paymentStatus, "paid");
+  assert.equal(recorded.paymentWindowStatus, "paid");
+  assert.equal(recorded.paymentDeadline, new Date(auctions[0].endsAt.getTime() + 48 * 60 * 60 * 1000).toISOString());
   assert.equal(recorded.deliveryStatus, "shipped");
   assert.equal(recorded.addressEditable, false);
   assert.equal(recorded.shippingAddress.recipientName, "Recipient");
   assert.equal(untouched.paymentStatus, "not_started");
+  assert.equal(untouched.paymentWindowStatus, "awaiting_payment");
+  assert.equal(untouched.paymentDeadline, new Date(auctions[1].endsAt.getTime() + 48 * 60 * 60 * 1000).toISOString());
   assert.equal(untouched.deliveryStatus, "not_started");
   assert.equal(untouched.shippingAddress, null);
   assert.equal(untouched.fulfillmentAvailable, false);
