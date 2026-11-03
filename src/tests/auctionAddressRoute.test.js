@@ -99,3 +99,39 @@ integration("address endpoint locks changes after delivery has started", async (
     assert.equal(stored.deliveryStatus, "shipped");
   } finally { process.env.AUCTION_ADDRESS_COLLECTION_ENABLED = "false"; }
 });
+
+integration("winner can save and update an address without duplicate fulfillment records", async () => {
+  // Reset the fixture from the delivery-lock test without affecting any real database.
+  await AuctionFulfillment.deleteMany({ auction: auction._id });
+  process.env.AUCTION_ADDRESS_COLLECTION_ENABLED = "true";
+  try {
+    const first = await put(token(winner._id));
+    assert.equal(first.response.status, 200);
+    assert.equal(first.body.shippingAddress.recipientName, "Recipient");
+    assert.equal(first.body.shippingAddress.zipCode, "66000000");
+    assert.equal(first.body.shippingAddress.phone, "91999999999");
+    assert.equal(await AuctionFulfillment.countDocuments({ auction: auction._id }), 1);
+    const updated = await put(token(winner._id), { ...address, number: "25", complement: "Apartment 2" });
+    assert.equal(updated.response.status, 200);
+    assert.equal(updated.body.shippingAddress.number, "25");
+    assert.equal(updated.body.shippingAddress.complement, "Apartment 2");
+    const records = await AuctionFulfillment.find({ auction: auction._id }).lean();
+    assert.equal(records.length, 1);
+    assert.equal(String(records[0].winner), String(winner._id));
+    assert.equal(records[0].shippingAddress.number, "25");
+    assert.equal(records[0].paymentStatus, "not_started");
+    assert.equal(records[0].deliveryStatus, "not_started");
+    assert.ok(records[0].addressSubmittedAt);
+  } finally { process.env.AUCTION_ADDRESS_COLLECTION_ENABLED = "false"; }
+});
+integration("saving an address does not permit another user to overwrite it", async () => {
+  process.env.AUCTION_ADDRESS_COLLECTION_ENABLED = "true";
+  try {
+    const before = await AuctionFulfillment.findOne({ auction: auction._id }).lean();
+    const attempt = await put(token(outsider._id), { ...address, number: "999" });
+    assert.equal(attempt.response.status, 404);
+    const afterRecord = await AuctionFulfillment.findOne({ auction: auction._id }).lean();
+    assert.equal(afterRecord.shippingAddress.number, before.shippingAddress.number);
+    assert.equal(await AuctionFulfillment.countDocuments({ auction: auction._id }), 1);
+  } finally { process.env.AUCTION_ADDRESS_COLLECTION_ENABLED = "false"; }
+});
