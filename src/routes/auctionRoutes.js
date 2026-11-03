@@ -9,6 +9,7 @@ import { validateAuctionShippingAddress } from "../services/auctionShippingAddre
 import { addressWriteDecision } from "../services/auctionAddressPolicy.js";
 import { calculatePaymentDeadline, paymentWindowState, canPrepareDelivery, canMarkDelivered } from "../services/auctionFulfillmentRules.js";
 import isAdmin from "../middlewares/isAdmin.js";
+import { validPaymentStates, validDeliveryStates } from "../services/auctionFulfillmentFilters.js";
 
 import {
   getBidByIdempotencyKey,
@@ -175,6 +176,49 @@ router.put("/my/wins/:auctionId/address", auth, async (req, res) => {
     if (error.code === 11000) return res.status(409).json({ message: "Arremate atualizado simultaneamente. Tente novamente." });
     console.error("Erro ao salvar endereço do arremate:", error);
     return res.status(500).json({ message: "Não foi possível salvar o endereço." });
+  }
+});
+
+router.get("/admin/fulfillments", auth, isAdmin, async (req, res) => {
+  try {
+    const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.page, 10) || 1));
+    const limit = 20;
+    const filter = {};
+    if (req.query.paymentStatus !== undefined) {
+      if (typeof req.query.paymentStatus !== "string" || !validPaymentStates.includes(req.query.paymentStatus)) {
+        return res.status(400).json({ message: "Filtro de pagamento inválido." });
+      }
+      filter.paymentStatus = req.query.paymentStatus;
+    }
+    if (req.query.deliveryStatus !== undefined) {
+      if (typeof req.query.deliveryStatus !== "string" || !validDeliveryStates.includes(req.query.deliveryStatus)) {
+        return res.status(400).json({ message: "Filtro de entrega inválido." });
+      }
+      filter.deliveryStatus = req.query.deliveryStatus;
+    }
+    const [total, records] = await Promise.all([
+      AuctionFulfillment.countDocuments(filter),
+      AuctionFulfillment.find(filter)
+        .select("auction winner product winningPriceCents wonAt paymentStatus deliveryStatus shippingAddress addressSubmittedAt")
+        .sort({ wonAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean()
+    ]);
+    res.set("Cache-Control", "no-store");
+    return res.json({ page, limit, total, items: records.map(record => ({
+      auctionId: String(record.auction),
+      winnerId: String(record.winner),
+      productId: String(record.product),
+      winningPriceCents: record.winningPriceCents,
+      wonAt: record.wonAt,
+      paymentDeadline: calculatePaymentDeadline(record.wonAt),
+      paymentWindowStatus: paymentWindowState({ wonAt: record.wonAt, paymentStatus: record.paymentStatus }),
+      paymentStatus: record.paymentStatus,
+      deliveryStatus: record.deliveryStatus,
+      shippingAddress: record.shippingAddress ?? null,
+      addressSubmittedAt: record.addressSubmittedAt ?? null
+    })) });
+  } catch (error) {
+    console.error("Erro ao listar entregas administrativas:", error);
+    return res.status(500).json({ message: "Não foi possível consultar as entregas." });
   }
 });
 
