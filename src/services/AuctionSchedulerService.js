@@ -28,7 +28,13 @@ export const processAuctionSchedules = async () => {
       );
       if (!auction) continue;
       activated++;
-      await recordAuctionAuditEvent(auction._id, "activated", now, "scheduler");
+      try {
+        await recordAuctionAuditEvent(auction._id, "activated", now, "scheduler");
+      } catch (auditError) {
+        // The state transition already committed. Do not suppress the SSE
+        // notification or prevent processing other auctions.
+        console.error("Falha ao registrar auditoria do leilão:", auction._id, auditError);
+      }
       publishAuctionEvent(auction._id, {
         status: auction.status, currentPriceCents: auction.currentPriceCents,
         bidCount: auction.bidCount, startsAt: auction.startsAt, endsAt: auction.endsAt,
@@ -50,7 +56,13 @@ export const processAuctionSchedules = async () => {
       );
       if (!auction) continue;
       finished++;
-      await recordAuctionAuditEvent(auction._id, "finished", now, "scheduler");
+      try {
+        await recordAuctionAuditEvent(auction._id, "finished", now, "scheduler");
+      } catch (auditError) {
+        // The state transition already committed. Do not suppress the SSE
+        // notification or prevent processing other auctions.
+        console.error("Falha ao registrar auditoria do leilão:", auction._id, auditError);
+      }
       publishAuctionEvent(auction._id, {
         status: auction.status, currentPriceCents: auction.currentPriceCents,
         bidCount: auction.bidCount, startsAt: auction.startsAt, endsAt: auction.endsAt,
