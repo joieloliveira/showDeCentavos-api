@@ -9,6 +9,7 @@ test("operations summary reports real collection counts without revenue or perso
   const originalAuctions = Auction.aggregate;
   const originalPayments = AuctionFulfillment.aggregate;
   const originalIncidents = WalletPaymentIncident.countDocuments;
+  const originalFulfillmentCount = AuctionFulfillment.countDocuments;
   let fulfillmentCalls = 0;
   try {
     Auction.aggregate = async () => [{ _id: "active", count: 3 }, { _id: "finished", count: 8 }];
@@ -18,6 +19,14 @@ test("operations summary reports real collection counts without revenue or perso
       if (field === "$paymentStatus") return [{ _id: "paid", count: 4 }, { _id: "pending", count: 2 }];
       if (field === "$deliveryStatus") return [{ _id: "shipped", count: 1 }, { _id: "delivered", count: 2 }];
       throw new Error("Unexpected aggregation");
+    };
+    AuctionFulfillment.countDocuments = async filter => {
+      if (filter.wonAt?.$lt) { assert.ok(filter.wonAt.$lt instanceof Date); return 7; }
+      if (filter.addressSubmittedAt === null) return 2;
+      if (filter.addressSubmittedAt?.$ne === null) return 4;
+      if (filter.deliveryStatus === "preparing") return 3;
+      if (filter.deliveryStatus === "shipped") return 1;
+      throw new Error("Unexpected fulfillment count filter");
     };
     WalletPaymentIncident.countDocuments = async filter => {
       assert.deepEqual(filter, { resolution: "review_required" });
@@ -40,11 +49,16 @@ test("operations summary reports real collection counts without revenue or perso
     assert.equal(response.body.deliveries.delivered, 2);
     assert.equal(response.body.incidentsRequiringReview, 5);
     assert.equal(fulfillmentCalls, 2);
+    assert.deepEqual(response.body.fulfillmentAlerts, {
+      overduePayments: 7, readyForPreparation: 4, awaitingAddress: 2,
+      preparingDeliveries: 3, shippedDeliveries: 1
+    });
     assert.equal("revenue" in response.body, false);
     assert.equal("users" in response.body, false);
   } finally {
     Auction.aggregate = originalAuctions;
     AuctionFulfillment.aggregate = originalPayments;
     WalletPaymentIncident.countDocuments = originalIncidents;
+    AuctionFulfillment.countDocuments = originalFulfillmentCount;
   }
 });
