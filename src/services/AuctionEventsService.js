@@ -13,10 +13,17 @@ export function publishAuctionEvent(auctionId, payload) {
       subscribers.delete(res);
       continue;
     }
-    if (!res.write(frame)) {
-      // Disconnect slow consumers instead of buffering unbounded data.
-      res.end();
+    try {
+      if (!res.write(frame)) {
+        // Disconnect slow consumers instead of buffering unbounded data.
+        res.end();
+        subscribers.delete(res);
+      }
+    } catch {
+      // A broken subscriber must never make a committed financial bid fail
+      // its HTTP response or stop updates to other subscribers.
       subscribers.delete(res);
+      try { res.end(); } catch { /* socket already broken */ }
     }
   }
   if (subscribers.size === 0) clients.delete(String(auctionId));
