@@ -29,7 +29,8 @@ export const processAuctionSchedules = async () => {
       if (!auction) continue;
       activated++;
       try {
-        await recordAuctionAuditEvent(auction._id, "activated", now, "scheduler");
+        const auditSaved = await recordAuctionAuditEvent(auction._id, "activated", now, "scheduler");
+        if (!auditSaved) console.error("Auditoria pendente para leilão:", String(auction._id), "activated");
       } catch (auditError) {
         // The state transition already committed. Do not suppress the SSE
         // notification or prevent processing other auctions.
@@ -57,7 +58,8 @@ export const processAuctionSchedules = async () => {
       if (!auction) continue;
       finished++;
       try {
-        await recordAuctionAuditEvent(auction._id, "finished", now, "scheduler");
+        const auditSaved = await recordAuctionAuditEvent(auction._id, "finished", now, "scheduler");
+        if (!auditSaved) console.error("Auditoria pendente para leilão:", String(auction._id), "finished");
       } catch (auditError) {
         // The state transition already committed. Do not suppress the SSE
         // notification or prevent processing other auctions.
