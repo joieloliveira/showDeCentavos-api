@@ -34,6 +34,7 @@ let server;
 let shuttingDown = false;
 const slug = 'browser-countdown-demo-' + randomUUID();
 const demoEmail = 'demo-winner-' + randomUUID() + '@example.invalid';
+const demoNickname = 'Demo' + randomUUID().replace(/-/g, '').slice(0, 20);
 
 async function cleanup() {
   if (shuttingDown) return;
@@ -61,7 +62,7 @@ async function main() {
       price: 10, stock: 1,
     });
     productId = product._id;
-    const demoUser = await User.create({ name: 'Demo Winner', email: demoEmail, publicNickname: 'VencedorDemo' });
+    const demoUser = await User.create({ name: 'Demo Winner', email: demoEmail, publicNickname: demoNickname });
     demoUserId = demoUser._id;
     const auction = await Auction.create({
       product: productId, status: 'scheduled', bidCostCents: 50,
