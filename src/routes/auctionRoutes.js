@@ -7,7 +7,7 @@ import Auction from "../models/Auction.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
 import { validateAuctionShippingAddress } from "../services/auctionShippingAddress.js";
 import { addressWriteDecision } from "../services/auctionAddressPolicy.js";
-import { calculatePaymentDeadline, paymentWindowState } from "../services/auctionFulfillmentRules.js";
+import { calculatePaymentDeadline, paymentWindowState, canPrepareDelivery, canMarkDelivered } from "../services/auctionFulfillmentRules.js";
 import isAdmin from "../middlewares/isAdmin.js";
 
 import {
@@ -175,6 +175,50 @@ router.put("/my/wins/:auctionId/address", auth, async (req, res) => {
     if (error.code === 11000) return res.status(409).json({ message: "Arremate atualizado simultaneamente. Tente novamente." });
     console.error("Erro ao salvar endereço do arremate:", error);
     return res.status(500).json({ message: "Não foi possível salvar o endereço." });
+  }
+});
+
+// Administrative delivery transitions. Payment status is never changed by this route.
+router.patch("/admin/fulfillments/:auctionId/delivery", auth, isAdmin, async (req, res) => {
+  if (process.env.AUCTION_DELIVERY_MANAGEMENT_ENABLED !== "true") {
+    return res.status(503).json({ message: "Gestão de entregas ainda não habilitada." });
+  }
+  const mongoose = (await import("mongoose")).default;
+  if (!mongoose.isValidObjectId(req.params.auctionId)) {
+    return res.status(400).json({ message: "Identificador de leilão inválido." });
+  }
+  const target = req.body?.deliveryStatus;
+  const previous = { preparing: "not_started", shipped: "preparing", delivered: "shipped" }[target];
+  if (!previous) return res.status(400).json({ message: "Transição de entrega inválida." });
+  try {
+    const record = await AuctionFulfillment.findOne({
+      auction: req.params.auctionId
+    }).select("paymentStatus deliveryStatus addressSubmittedAt").lean();
+    if (!record) return res.status(404).json({ message: "Arremate não encontrado." });
+    if (record.paymentStatus !== "paid") {
+      return res.status(409).json({ message: "Pagamento confirmado é obrigatório para entrega." });
+    }
+    if (!record.addressSubmittedAt) {
+      return res.status(409).json({ message: "Endereço do vencedor ainda não informado." });
+    }
+    if (record.deliveryStatus !== previous ||
+        (target === "preparing" && !canPrepareDelivery(record)) ||
+        (target === "delivered" && !canMarkDelivered(record))) {
+      return res.status(409).json({ message: "Estado atual não permite esta transição." });
+    }
+    const updated = await AuctionFulfillment.findOneAndUpdate(
+      { auction: req.params.auctionId, paymentStatus: "paid",
+        deliveryStatus: previous, addressSubmittedAt: { $ne: null } },
+      { $set: { deliveryStatus: target } },
+      { returnDocument: "after", runValidators: true }
+    ).select("auction paymentStatus deliveryStatus");
+    if (!updated) return res.status(409).json({ message: "Arremate alterado simultaneamente." });
+    res.set("Cache-Control", "no-store");
+    return res.json({ auctionId: String(updated.auction), paymentStatus: updated.paymentStatus,
+      deliveryStatus: updated.deliveryStatus });
+  } catch (error) {
+    console.error("Erro ao atualizar entrega do arremate:", error);
+    return res.status(500).json({ message: "Não foi possível atualizar a entrega." });
   }
 });
 
