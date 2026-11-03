@@ -193,13 +193,18 @@ router.patch("/admin/fulfillments/:auctionId/delivery", auth, isAdmin, async (re
   try {
     const record = await AuctionFulfillment.findOne({
       auction: req.params.auctionId
-    }).select("paymentStatus deliveryStatus addressSubmittedAt").lean();
+    }).select("paymentStatus deliveryStatus addressSubmittedAt shippingAddress").lean();
     if (!record) return res.status(404).json({ message: "Arremate não encontrado." });
     if (record.paymentStatus !== "paid") {
       return res.status(409).json({ message: "Pagamento confirmado é obrigatório para entrega." });
     }
     if (!record.addressSubmittedAt) {
       return res.status(409).json({ message: "Endereço do vencedor ainda não informado." });
+    }
+    try {
+      validateAuctionShippingAddress(record.shippingAddress);
+    } catch {
+      return res.status(409).json({ message: "Endereço do vencedor incompleto ou inválido." });
     }
     if (record.deliveryStatus !== previous ||
         (target === "preparing" && !canPrepareDelivery(record)) ||
