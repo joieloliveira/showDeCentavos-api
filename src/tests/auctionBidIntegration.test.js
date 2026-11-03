@@ -150,3 +150,39 @@ integration("reconciliation does not reveal bids belonging to another user", asy
     await User.deleteOne({ _id: other._id });
   }
 });
+
+integration("financial audit reconciles every bid, ledger debit and final wallet balance", async () => {
+  const [user, auction, bids, ledger] = await Promise.all([
+    User.findById(userId).lean(),
+    Auction.findById(auctionId).lean(),
+    Bid.find({ auction: auctionId, user: userId }).lean(),
+    WalletTransaction.find({ auction: auctionId, user: userId, type: "bid" }).lean()
+  ]);
+  assert.ok(user && auction);
+  assert.ok(bids.length > 0, "test must audit committed bids");
+  assert.equal(auction.bidCount, bids.length);
+  assert.equal(auction.currentPriceCents, auction.startPriceCents + bids.length * auction.bidIncrementCents);
+  assert.equal(ledger.length, bids.length, "one ledger debit for each committed bid");
+  const byBid = new Map();
+  for (const tx of ledger) {
+    assert.ok(tx.bid, "ledger debit must reference its bid");
+    const key = String(tx.bid);
+    assert.equal(byBid.has(key), false, "duplicate ledger debit for a bid");
+    byBid.set(key, tx);
+    assert.ok(tx.amountCents < 0, "bid must debit, never credit");
+    assert.ok(Number.isSafeInteger(tx.balanceAfterCents) && tx.balanceAfterCents >= 0);
+  }
+  for (const bidRecord of bids) {
+    const tx = byBid.get(String(bidRecord._id));
+    assert.ok(tx, "committed bid must have a ledger debit");
+    assert.equal(String(tx.user), String(bidRecord.user));
+    assert.equal(String(tx.auction), String(bidRecord.auction));
+    assert.equal(tx.amountCents, -bidRecord.bidCostCents);
+    assert.equal(tx.balanceAfterCents, bidRecord.balanceAfterCents);
+    assert.equal(bidRecord.priceAfterCents - bidRecord.priceBeforeCents, auction.bidIncrementCents);
+  }
+  const totalDebits = ledger.reduce((sum, tx) => sum + tx.amountCents, 0);
+  // This isolated fixture starts at 100 cents and receives no deposits.
+  assert.equal(user.wallet.balanceCents, 100 + totalDebits);
+  assert.ok(user.wallet.balanceCents >= 0);
+});
