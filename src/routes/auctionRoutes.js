@@ -256,22 +256,38 @@ router.patch("/admin/fulfillments/:auctionId/delivery", auth, isAdmin, async (re
         (target === "delivered" && !canMarkDelivered(record))) {
       return res.status(409).json({ message: "Estado atual não permite esta transição." });
     }
-    const updated = await AuctionFulfillment.findOneAndUpdate(
-      { auction: req.params.auctionId, paymentStatus: "paid",
-        deliveryStatus: previous, addressSubmittedAt: { $ne: null } },
-      { $set: { deliveryStatus: target } },
-      { returnDocument: "after", runValidators: true }
-    ).select("auction paymentStatus deliveryStatus");
-    if (!updated) return res.status(409).json({ message: "Arremate alterado simultaneamente." });
+    let updated;
     try {
-      await AuctionDeliveryAuditEvent.create({
-        auction: updated.auction, actor: req.user.id,
-        fromStatus: previous, toStatus: target, occurredAt: new Date()
-      });
-    } catch (auditError) {
-      // The delivery transition already committed. Surface the audit failure for operations.
-      console.error("ALERTA: transição de entrega sem auditoria persistida:", String(updated.auction), target, auditError);
-      return res.status(500).json({ message: "Entrega atualizada, mas o registro de auditoria falhou. Verifique o estado antes de tentar novamente." });
+      const session = await mongoose.startSession();
+      try {
+        await session.withTransaction(async () => {
+          updated = await AuctionFulfillment.findOneAndUpdate(
+            { auction: req.params.auctionId, paymentStatus: "paid",
+              deliveryStatus: previous, addressSubmittedAt: { $ne: null } },
+            { $set: { deliveryStatus: target } },
+            { returnDocument: "after", runValidators: true, session }
+          ).select("auction paymentStatus deliveryStatus");
+          if (!updated) {
+            const conflict = new Error("Delivery transition conflict");
+            conflict.code = "DELIVERY_CONFLICT";
+            throw conflict;
+          }
+          await AuctionDeliveryAuditEvent.create([{
+            auction: updated.auction, actor: req.user.id,
+            fromStatus: previous, toStatus: target, occurredAt: new Date()
+          }], { session });
+        });
+      } finally {
+        await session.endSession();
+      }
+    } catch (transactionError) {
+      if (transactionError.code === "DELIVERY_CONFLICT" ||
+          transactionError.hasErrorLabel?.("TransientTransactionError") ||
+          transactionError.code === 11000 ||
+          transactionError.code === 112) {
+        return res.status(409).json({ message: "Arremate alterado simultaneamente." });
+      }
+      throw transactionError;
     }
     res.set("Cache-Control", "no-store");
     return res.json({ auctionId: String(updated.auction), paymentStatus: updated.paymentStatus,
