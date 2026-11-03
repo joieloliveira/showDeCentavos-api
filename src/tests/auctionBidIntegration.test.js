@@ -98,3 +98,55 @@ integration("insufficient balance rejects without ledger write", async () => {
   assert.equal(await Bid.countDocuments(), before);
   assert.equal(await WalletTransaction.countDocuments({ type: "bid" }), before);
 });
+
+integration("authenticated reconciliation returns only the owner's recorded bid", async () => {
+  const existing = await Bid.findOne().lean();
+  assert.ok(existing);
+  const beforeWallet = (await User.findById(userId)).wallet.balanceCents;
+  const beforeLedger = await WalletTransaction.countDocuments({ type: "bid" });
+  const beforeBids = await Bid.countDocuments();
+  process.env.AUCTION_BIDDING_ENABLED = "false";
+  try {
+    const response = await fetch(`${base}/api/auctions/bids/by-key/${existing.idempotencyKey}`, {
+      headers: { authorization: `Bearer ${token()}` }
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(String(body.bid._id), String(existing._id));
+    assert.equal(body.bid.idempotencyKey, existing.idempotencyKey);
+    assert.equal(String(body.bid.auction), String(auctionId));
+    assert.equal((await User.findById(userId)).wallet.balanceCents, beforeWallet);
+    assert.equal(await Bid.countDocuments(), beforeBids);
+    assert.equal(await WalletTransaction.countDocuments({ type: "bid" }), beforeLedger);
+  } finally { process.env.AUCTION_BIDDING_ENABLED = "true"; }
+});
+integration("reconciliation rejects unauthenticated, invalid and unknown keys", async () => {
+  const existing = await Bid.findOne().lean();
+  assert.ok(existing);
+  const endpoint = `${base}/api/auctions/bids/by-key/`;
+  assert.equal((await fetch(endpoint + existing.idempotencyKey)).status, 401);
+  assert.equal((await fetch(endpoint + "not-a-uuid", {
+    headers: { authorization: `Bearer ${token()}` }
+  })).status, 400);
+  assert.equal((await fetch(endpoint + key(999999), {
+    headers: { authorization: `Bearer ${token()}` }
+  })).status, 404);
+});
+integration("reconciliation does not reveal bids belonging to another user", async () => {
+  const existing = await Bid.findOne().lean();
+  assert.ok(existing);
+  const other = await User.create({
+    name: "Other Bid Reader", email: `other-bid-${Date.now()}@example.test`,
+    isActive: true, wallet: { balanceCents: 0 }
+  });
+  try {
+    const otherToken = jwt.sign({ id: String(other._id), role: "customer" }, process.env.JWT_SECRET);
+    const response = await fetch(`${base}/api/auctions/bids/by-key/${existing.idempotencyKey}`, {
+      headers: { authorization: `Bearer ${otherToken}` }
+    });
+    assert.equal(response.status, 404);
+    assert.equal((await response.json()).bid, undefined);
+  } finally {
+    await User.deleteOne({ _id: other._id });
+  }
+});
