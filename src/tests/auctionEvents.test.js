@@ -97,3 +97,23 @@ test('SSE disconnects stalled subscribers on heartbeat backpressure', () => {
     globalThis.clearInterval = originalClearInterval;
   }
 });
+
+
+test('SSE write failure cannot interrupt updates to healthy auction subscribers', () => {
+  const auctionId = 'broken-socket-' + Math.random().toString(36).slice(2);
+  const broken = client();
+  const healthy = client();
+  try {
+    subscribeAuctionEvents(broken.req, broken.res, auctionId);
+    subscribeAuctionEvents(healthy.req, healthy.res, auctionId);
+    broken.res.write = () => { throw new Error('socket disconnected'); };
+    assert.doesNotThrow(() => publishAuctionEvent(auctionId, { status: 'active', bidCount: 1 }));
+    assert.equal(broken.res.writableEnded, true);
+    assert.equal(healthy.res.frames.length, 2);
+    publishAuctionEvent(auctionId, { status: 'finished' });
+    assert.equal(healthy.res.frames.length, 3);
+  } finally {
+    broken.req.emit('close');
+    healthy.req.emit('close');
+  }
+});
