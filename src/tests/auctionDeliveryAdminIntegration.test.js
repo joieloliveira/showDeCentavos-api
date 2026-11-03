@@ -89,3 +89,18 @@ integration("admin advances delivery in order, rejecting skips and duplicate tra
   assert.equal(record.deliveryStatus, "delivered");
   assert.equal(record.paymentStatus, "paid");
 });
+
+integration("concurrent delivery requests accept only one transition per stage", async () => {
+  for (const target of ["preparing", "shipped", "delivered"]) {
+    const current = await AuctionFulfillment.findOne({ auction: auctionId });
+    await AuctionFulfillment.updateOne(
+      { auction: auctionId },
+      { $set: { deliveryStatus: target === "preparing" ? "not_started" : target === "shipped" ? "preparing" : "shipped" } }
+    );
+    const results = await Promise.all([patch(admin, target), patch(admin, target)]);
+    assert.deepEqual(results.map(result => result.status).sort(), [200, 409]);
+    const updated = await AuctionFulfillment.findOne({ auction: auctionId });
+    assert.equal(updated.deliveryStatus, target);
+    assert.equal(updated.paymentStatus, "paid");
+  }
+});
