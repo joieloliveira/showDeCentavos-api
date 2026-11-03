@@ -7,6 +7,7 @@ import Auction from "../models/Auction.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
 import { validateAuctionShippingAddress } from "../services/auctionShippingAddress.js";
 import { addressWriteDecision } from "../services/auctionAddressPolicy.js";
+import { calculatePaymentDeadline, paymentWindowState } from "../services/auctionFulfillmentRules.js";
 import isAdmin from "../middlewares/isAdmin.js";
 
 import {
@@ -109,6 +110,11 @@ router.get("/my/wins", auth, async (req, res) => {
         coverImageUrl: auction.product?.coverImage?.url || auction.product?.images?.[0]?.url || null,
         finalPriceCents: auction.currentPriceCents,
         finishedAt: auction.endsAt,
+        paymentDeadline: auction.endsAt ? calculatePaymentDeadline(auction.endsAt) : null,
+        paymentWindowStatus: auction.endsAt ? paymentWindowState({
+          wonAt: auction.endsAt,
+          paymentStatus: fulfillmentByAuction.get(String(auction._id))?.paymentStatus || "not_started"
+        }) : null,
         bidCount: auction.bidCount,
         paymentStatus: fulfillmentByAuction.get(String(auction._id))?.paymentStatus || "not_started",
         deliveryStatus: fulfillmentByAuction.get(String(auction._id))?.deliveryStatus || "not_started",
