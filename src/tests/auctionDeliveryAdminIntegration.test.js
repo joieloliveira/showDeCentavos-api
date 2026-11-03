@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import jwt from "jsonwebtoken";
 import auctionRoutes from "../routes/auctionRoutes.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
+import AuctionDeliveryAuditEvent from "../models/AuctionDeliveryAuditEvent.js";
 import User from "../models/User.js";
 
 const uri = process.env.WALLET_TEST_MONGODB_URI || "";
@@ -92,7 +93,7 @@ integration("admin advances delivery in order, rejecting skips and duplicate tra
 
 integration("concurrent delivery requests accept only one transition per stage", async () => {
   for (const target of ["preparing", "shipped", "delivered"]) {
-    const current = await AuctionFulfillment.findOne({ auction: auctionId });
+    await AuctionDeliveryAuditEvent.deleteMany({ auction: auctionId, toStatus: target });
     await AuctionFulfillment.updateOne(
       { auction: auctionId },
       { $set: { deliveryStatus: target === "preparing" ? "not_started" : target === "shipped" ? "preparing" : "shipped" } }
@@ -102,5 +103,9 @@ integration("concurrent delivery requests accept only one transition per stage",
     const updated = await AuctionFulfillment.findOne({ auction: auctionId });
     assert.equal(updated.deliveryStatus, target);
     assert.equal(updated.paymentStatus, "paid");
+    const audit = await AuctionDeliveryAuditEvent.find({ auction: auctionId, toStatus: target }).lean();
+    assert.equal(audit.length, 1);
+    assert.equal(String(audit[0].actor), String(admin._id));
+    assert.equal(audit[0].fromStatus, target === "preparing" ? "not_started" : target === "shipped" ? "preparing" : "shipped");
   }
 });
