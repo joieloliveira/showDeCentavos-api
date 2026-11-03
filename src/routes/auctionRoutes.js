@@ -33,24 +33,31 @@ router.get("/my/participations", auth, async (req, res) => {
     const page = Math.min(10000, Math.max(1, Number.parseInt(req.query.page, 10) || 1));
     const limit = 20;
     const userId = req.user.id;
-    const [groups, totalGroups, wonAuctions] = await Promise.all([
-      Bid.aggregate([
-        { $match: { user: new (await import("mongoose")).default.Types.ObjectId(userId) } },
-        { $group: { _id: "$auction", bidCount: { $sum: 1 }, totalSpentCents: { $sum: "$bidCostCents" }, lastBidAt: { $max: "$createdAt" } } },
-        { $sort: { lastBidAt: -1, _id: -1 } },
-        { $skip: (page - 1) * limit }, { $limit: limit }
-      ]),
-      Bid.distinct("auction", { user: userId }),
-      Auction.find({ winner: userId }).select("_id").lean()
+    // Count groups in MongoDB instead of materializing every distinct auction ID.
+    // The facet keeps the page and total consistent within one aggregation.
+    const mongoose = (await import("mongoose")).default;
+    const [history = { items: [], metadata: [] }] = await Bid.aggregate([
+      { $match: { user: new mongoose.Types.ObjectId(userId) } },
+      { $group: { _id: "$auction", bidCount: { $sum: 1 }, totalSpentCents: { $sum: "$bidCostCents" }, lastBidAt: { $max: "$createdAt" } } },
+      { $facet: {
+        items: [
+          { $sort: { lastBidAt: -1, _id: -1 } },
+          { $skip: (page - 1) * limit },
+          { $limit: limit }
+        ],
+        metadata: [{ $count: "total" }]
+      } }
     ]);
-    const auctionIds = [...new Set([...groups.map(g => String(g._id)), ...wonAuctions.map(a => String(a._id))])];
+    const groups = history.items;
+    const total = history.metadata[0]?.total ?? 0;
+    const auctionIds = groups.map(group => group._id);
     const auctions = await Auction.find({ _id: { $in: auctionIds } })
       .select("product status currentPriceCents winner endsAt startsAt")
       .populate("product", "name title images").lean();
     const byId = new Map(auctions.map(a => [String(a._id), a]));
     res.set("Cache-Control", "no-store");
     return res.json({
-      page, limit, total: totalGroups.length,
+      page, limit, total,
       items: groups.map(g => {
         const auction = byId.get(String(g._id));
         return {
