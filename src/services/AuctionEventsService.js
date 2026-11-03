@@ -46,7 +46,15 @@ export function subscribeAuctionEvents(req, res, auctionId) {
   res.write(': connected\n\n');
   const heartbeat = setInterval(() => {
     if (res.destroyed || res.writableEnded) return cleanup();
-    if (!res.write(': heartbeat\n\n')) {\n      res.end();\n      cleanup();\n    }
+    try {
+      if (!res.write(': heartbeat\n\n')) {
+        res.end();
+        cleanup();
+      }
+    } catch {
+      cleanup();
+      try { res.end(); } catch { /* socket already broken */ }
+    }
   }, 20000);
   heartbeat.unref?.();
   function cleanup() {
