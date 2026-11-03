@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { mock } from "node:test";
 import { WebhookSignatureValidator, InvalidWebhookSignatureError } from "mercadopago";
 import WalletDeposit from "../src/models/WalletDeposit.js";
+import WalletPaymentIncident from "../src/models/WalletPaymentIncident.js";
 import MercadoPagoProvider from "../src/services/payments/MercadoPagoProvider.js";
 import { walletPixWebhook } from "../src/controllers/webhooks/WalletPixWebhookController.js";
 
@@ -112,7 +113,13 @@ test("refund webhook creates an incident for manual review", async (t) => {
     _id: id, user: "507f1f77bcf86cd799439012",
     provider: "mercadopago", providerOrderId: orderId,
   }));
+  const incident = mock.method(WalletPaymentIncident, "findOneAndUpdate", async (filter, changes) => {
+    assert.equal(filter.providerStatus, "refunded");
+    assert.equal(changes.$setOnInsert.resolution, "review_required");
+    return { ...filter };
+  });
   const res = makeResponse();
   await walletPixWebhook(makeRequest(), res);
-  assert.equal(res.code, 500);
+  assert.equal(res.code, 200);
+  assert.equal(incident.mock.callCount(), 1);
 });
