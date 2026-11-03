@@ -81,3 +81,19 @@ test("webhook leaves pending PIX uncredited", async (t) => {
   assert.equal(res.code, 200);
   assert.equal(link.mock.callCount(), 1);
 });
+
+
+test("webhook rejects a provider response for a different order", async (t) => {
+  withSecret(t);
+  mock.method(WebhookSignatureValidator, "validate", () => {});
+  mock.method(MercadoPagoProvider, "getOrder", async () => ({
+    orderId: "ORD-DIFFERENT", externalReference: id, normalizedStatus: "approved",
+  }));
+  const lookup = mock.method(WalletDeposit, "findOne", async () => {
+    throw new Error("unexpected deposit lookup");
+  });
+  const res = makeResponse();
+  await walletPixWebhook(makeRequest(), res);
+  assert.equal(res.code, 500);
+  assert.equal(lookup.mock.callCount(), 0);
+});
