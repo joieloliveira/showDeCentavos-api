@@ -1,11 +1,12 @@
 import mongoose from "mongoose";
 import AuctionWinnerPayment from "../models/AuctionWinnerPayment.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
+import AuctionWinnerPixAttempt from "../models/AuctionWinnerPixAttempt.js";
 import { validateAuctionPixConfirmation } from "./auctionPixConfirmationPolicy.js";
 
 // Internal-only processor: providerOrder must come from a trusted, independently
 // fetched provider response. Not exposed as an HTTP endpoint.
-export async function processVerifiedAuctionPix({ paymentId, providerOrder }) {
+export async function processVerifiedAuctionPix({ paymentId, providerOrder, reconcileAttempt = false }) {
   if (!mongoose.isObjectIdOrHexString(paymentId) || !providerOrder) {
     return { processed: false, reason: "INVALID_INPUT" };
   }
@@ -23,6 +24,17 @@ export async function processVerifiedAuctionPix({ paymentId, providerOrder }) {
         outcome = { processed: false, reason: decision.reason };
         return;
       }
+      if (reconcileAttempt) {
+        const attempt = await AuctionWinnerPixAttempt.findOne({
+          payment: payment._id, auction: payment.auction,
+          state: { $in: ["request_unknown", "reconciliation_required"] },
+        }).session(session);
+        if (!attempt || (attempt.providerOrderId &&
+            String(attempt.providerOrderId) !== String(providerOrder.orderId))) {
+          outcome = { processed: false, reason: "RECONCILIATION_ATTEMPT_MISMATCH" };
+          return;
+        }
+      }
       const claimed = await AuctionWinnerPayment.findOneAndUpdate({
         _id: payment._id, status: "pending", processedAt: null,
         providerOrderId: String(providerOrder.orderId)
@@ -39,6 +51,18 @@ export async function processVerifiedAuctionPix({ paymentId, providerOrder }) {
       }, { $set: { paymentStatus: "paid" } }, { session });
       if (updated.modifiedCount !== 1) {
         throw new Error("Fulfillment payment transition failed; rolling back charge confirmation.");
+      }
+      if (reconcileAttempt) {
+        const attemptUpdate = await AuctionWinnerPixAttempt.updateOne({
+          payment: payment._id, auction: payment.auction,
+          state: { $in: ["request_unknown", "reconciliation_required"] },
+          $or: [{ providerOrderId: null }, { providerOrderId: String(providerOrder.orderId) }],
+        }, {
+          $set: { state: "provider_confirmed", providerOrderId: String(providerOrder.orderId), lastError: null },
+        }, { session });
+        if (attemptUpdate.modifiedCount !== 1) {
+          throw new Error("PIX attempt finalization failed; rolling back payment confirmation.");
+        }
       }
       outcome = { processed: true, paymentId: String(payment._id) };
     });
