@@ -63,4 +63,38 @@ if (!safe) {
       await mongoose.disconnect();
     }
   });
+  test("verified approved PIX is reported read-only without changing financial records", async () => {
+    await mongoose.connect(uri, { dbName: `pix_reconcile_approved_${process.pid}_${Date.now()}` });
+    const original = MercadoPagoProvider.getOrder;
+    try {
+      const auctionId = new mongoose.Types.ObjectId(), paymentId = new mongoose.Types.ObjectId();
+      const winner = new mongoose.Types.ObjectId(), fulfillmentId = new mongoose.Types.ObjectId();
+      await AuctionWinnerPixAttempt.create({ payment: paymentId, auction: auctionId,
+        idempotencyKey: `pix-${auctionId}`, state: "reconciliation_required" });
+      await AuctionWinnerPayment.create({ _id: paymentId, auction: auctionId,
+        fulfillment: fulfillmentId, winner, amountCents: 150, status: "pending",
+        providerOrderId: "ORDER-1" });
+      await AuctionFulfillment.create({ _id: fulfillmentId, auction: auctionId,
+        winner, product: new mongoose.Types.ObjectId(), winningPriceCents: 150,
+        wonAt: new Date(), paymentStatus: "pending" });
+      MercadoPagoProvider.getOrder = async () => ({
+        orderId: "ORDER-1", externalReference: String(paymentId),
+        normalizedStatus: "approved", payment: { id: "PIX-1", method: "pix" },
+        raw: { total_amount: "1.50", transactions: { payments: [{
+          id: "PIX-1", status: "processed", amount: "1.50", payment_method: { id: "pix" },
+        }] } },
+      });
+      const result = await inspectAuctionPixProviderOutcome({ paymentId });
+      assert.equal(result.resolved, true);
+      assert.equal(result.action, "CONFIRM_USING_EXISTING_VERIFIED_PAYMENT_FLOW");
+      assert.equal((await AuctionWinnerPayment.findById(paymentId)).status, "pending");
+      assert.equal((await AuctionFulfillment.findById(fulfillmentId)).paymentStatus, "pending");
+      assert.equal((await AuctionWinnerPixAttempt.findOne()).state, "reconciliation_required");
+    } finally {
+      MercadoPagoProvider.getOrder = original;
+      await mongoose.connection.dropDatabase();
+      await mongoose.disconnect();
+    }
+  });
+
 }
