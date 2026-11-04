@@ -42,6 +42,7 @@ if (!safe) {
       assert.equal(await AuctionWinnerPayment.countDocuments({ auction: auction._id }), 1);
       const payment = await AuctionWinnerPayment.findOne({ auction: auction._id });
       assert.equal(payment.status, "pending");
+      assert.equal((await AuctionFulfillment.findOne({ auction: auction._id })).paymentStatus, "pending");
       assert.equal(payment.providerOrderId, null);
       const replay = await reserveAuctionWinnerPixAttempt({ auction, winnerId });
       assert.equal(replay.reserved, false);
