@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Order from "../../models/Order.js";
 import Product from "../../models/Product.js";
 import WalletDeposit from "../../models/WalletDeposit.js";
+import { routeAuctionPixWebhook } from "../../services/AuctionPixWebhookRouter.js";
 
 import {
   WebhookSignatureValidator,
@@ -161,6 +162,19 @@ export const mercadoPagoOrderWebhook = async (
         providerOrder.orderId
       );
 
+      return res.sendStatus(200);
+    }
+
+    // Auction PIX has its own financial domain. Route only after signature
+    // validation and provider lookup; never fall through when matched.
+    const auctionPix = await routeAuctionPixWebhook({
+      externalReference: internalOrderId,
+      providerOrderId: String(providerOrder.orderId),
+    });
+    if (auctionPix.matched) {
+      if (!auctionPix.processed) {
+        console.log("Auction PIX webhook not processed:", auctionPix.reason);
+      }
       return res.sendStatus(200);
     }
 
