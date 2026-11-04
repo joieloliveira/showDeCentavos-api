@@ -151,3 +151,32 @@ integration("delivery audit history is admin-only, ordered, and excludes winner 
     headers: { authorization: `Bearer ${token(admin)}` }
   })).status, 404);
 });
+
+integration("administrative fulfillment listing requires admin and supports filtered detail data", async () => {
+  const url = `${base}/api/auctions/admin/fulfillments`;
+  const get = async (user, suffix = "") => {
+    const response = await fetch(url + suffix, {
+      headers: user ? { authorization: `Bearer ${token(user)}` } : {}
+    });
+    return { status: response.status, body: await response.json(), cache: response.headers.get("cache-control") };
+  };
+  assert.equal((await get(null)).status, 401);
+  assert.equal((await get(customer)).status, 403);
+  assert.equal((await get(admin, "?paymentStatus=unknown")).status, 400);
+  assert.equal((await get(admin, "?deliveryStatus=unknown")).status, 400);
+  const result = await get(admin, "?paymentStatus=paid&deliveryStatus=not_started");
+  assert.equal(result.status, 200);
+  assert.equal(result.cache, "no-store");
+  assert.equal(result.body.total, 1);
+  const item = result.body.items[0];
+  assert.equal(item.auctionId, String(auctionId));
+  assert.equal(item.winnerId, String(customer._id));
+  assert.equal(item.paymentStatus, "paid");
+  assert.equal(item.deliveryStatus, "not_started");
+  assert.equal(item.shippingAddress.recipientName, "Winner");
+  assert.equal(item.shippingAddress.zipCode, "66000000");
+  const empty = await get(admin, "?paymentStatus=pending");
+  assert.equal(empty.status, 200);
+  assert.equal(empty.body.total, 0);
+  assert.deepEqual(empty.body.items, []);
+});
