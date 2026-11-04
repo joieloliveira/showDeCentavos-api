@@ -140,8 +140,9 @@ integration("delivery audit history is admin-only, ordered, and excludes winner 
   assert.deepEqual(result.body.items.map(item => item.toStatus), ["preparing", "shipped", "delivered"]);
   for (const item of result.body.items) {
     assert.equal(item.actorId, String(admin._id));
+    assert.equal(item.actorName, "Delivery Admin");
     assert.ok(item.occurredAt);
-    assert.deepEqual(Object.keys(item).sort(), ["actorId", "fromStatus", "occurredAt", "toStatus"].sort());
+    assert.deepEqual(Object.keys(item).sort(), ["actorId", "actorName", "fromStatus", "occurredAt", "toStatus"].sort());
   }
   assert.equal((await fetch(`${base}/api/auctions/admin/fulfillments/invalid/delivery-audit`, {
     headers: { authorization: `Bearer ${token(admin)}` }
