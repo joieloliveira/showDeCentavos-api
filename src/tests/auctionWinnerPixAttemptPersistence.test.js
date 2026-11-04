@@ -38,6 +38,7 @@ if (!safe) {
       assert.equal(String(attempt.payment), String(payment._id));
       assert.equal(attempt.idempotencyKey, `auction-winner-pix-${auctionId}`);
       assert.equal(attempt.state, "reserved");
+      assert.equal((await AuctionFulfillment.findOne({ auction: auctionId })).paymentStatus, "pending");
       const replay = await reserveAuctionWinnerPixAttempt({ auction, winnerId });
       assert.equal(replay.reserved, false);
       assert.equal(await AuctionWinnerPixAttempt.countDocuments(), 1);
