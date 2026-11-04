@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import AuctionWinnerPayment from "../models/AuctionWinnerPayment.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
+import AuctionWinnerPixAttempt from "../models/AuctionWinnerPixAttempt.js";
 import { planAuctionWinnerPixCharge } from "./auctionWinnerPixChargePolicy.js";
 
 // This reserves a logical charge locally. It NEVER calls Mercado Pago.
@@ -38,6 +39,15 @@ export async function reserveAuctionWinnerPixAttempt({ auction, winnerId, now = 
           status: "pending",
         }], { session });
         result = { reserved: true, paymentId: String(created._id), logicalChargeKey: plan.logicalChargeKey };
+      }
+      if (result.reserved) {
+        const [attempt] = await AuctionWinnerPixAttempt.create([{
+          payment: result.paymentId,
+          auction: auction._id,
+          idempotencyKey: `auction-winner-pix-${auction._id}`,
+          state: "reserved",
+        }], { session });
+        result.idempotencyKey = attempt.idempotencyKey;
       }
     });
     return result;
