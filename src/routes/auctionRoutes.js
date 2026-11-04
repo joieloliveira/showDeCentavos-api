@@ -6,6 +6,7 @@ import Bid from "../models/Bid.js";
 import Auction from "../models/Auction.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
 import AuctionDeliveryAuditEvent from "../models/AuctionDeliveryAuditEvent.js";
+import User from "../models/User.js";
 import { validateAuctionShippingAddress } from "../services/auctionShippingAddress.js";
 import { addressWriteDecision } from "../services/auctionAddressPolicy.js";
 import { calculatePaymentDeadline, paymentWindowState, canPrepareDelivery, canMarkDelivered } from "../services/auctionFulfillmentRules.js";
@@ -237,10 +238,15 @@ router.get("/admin/fulfillments/:auctionId/delivery-audit", auth, isAdmin, async
       .select("actor fromStatus toStatus occurredAt -_id")
       .sort({ occurredAt: 1, toStatus: 1 })
       .lean();
+    const actorIds = [...new Set(events.map(event => String(event.actor)))];
+    const actors = await User.find({ _id: { $in: actorIds }, role: "admin" })
+      .select("name").lean();
+    const actorNames = new Map(actors.map(actor => [String(actor._id), actor.name]));
     res.set("Cache-Control", "no-store");
     return res.json({
       auctionId: String(req.params.auctionId),
       items: events.map(event => ({
+        actorName: actorNames.get(String(event.actor)) ?? null,
         actorId: String(event.actor),
         fromStatus: event.fromStatus,
         toStatus: event.toStatus,
