@@ -7,6 +7,7 @@ import Auction from "../models/Auction.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
 import AuctionDeliveryAuditEvent from "../models/AuctionDeliveryAuditEvent.js";
 import User from "../models/User.js";
+import { auctionPaymentPreview } from "../services/auctionPaymentPreview.js";
 import { validateAuctionShippingAddress } from "../services/auctionShippingAddress.js";
 import { addressWriteDecision } from "../services/auctionAddressPolicy.js";
 import { calculatePaymentDeadline, paymentWindowState, canPrepareDelivery, canMarkDelivered } from "../services/auctionFulfillmentRules.js";
@@ -130,6 +131,31 @@ router.get("/my/wins", auth, async (req, res) => {
   } catch (error) {
     console.error("Erro ao consultar vitórias:", error);
     return res.status(500).json({ message: "Não foi possível consultar suas vitórias." });
+  }
+});
+
+// Winner-only payment preview. Read-only; checkout and provider payments remain disabled.
+router.get("/my/wins/:auctionId/payment-preview", auth, async (req, res) => {
+  const mongoose = (await import("mongoose")).default;
+  if (!mongoose.isValidObjectId(req.params.auctionId)) {
+    return res.status(400).json({ message: "Identificador de leilão inválido." });
+  }
+  try {
+    const auction = await Auction.findById(req.params.auctionId)
+      .select("_id winner status endsAt currentPriceCents").lean();
+    if (!auction || String(auction.winner ?? "") !== String(req.user.id) || auction.status !== "finished") {
+      return res.status(404).json({ message: "Arremate não encontrado para este vencedor." });
+    }
+    const fulfillment = await AuctionFulfillment.findOne({ auction: auction._id })
+      .select("auction winner winningPriceCents paymentStatus").lean();
+    const preview = auctionPaymentPreview({ auction, fulfillment, userId: req.user.id });
+    res.set("Cache-Control", "no-store");
+    return preview.status === 200
+      ? res.json(preview.data)
+      : res.status(preview.status).json({ message: preview.message });
+  } catch (error) {
+    console.error("Erro ao consultar prévia de pagamento do arremate:", error);
+    return res.status(500).json({ message: "Não foi possível consultar o pagamento do arremate." });
   }
 });
 
