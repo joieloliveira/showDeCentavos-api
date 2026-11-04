@@ -122,3 +122,31 @@ integration("failed audit insert rolls back delivery status atomically", async (
   assert.equal(record.deliveryStatus, "not_started", "delivery update must roll back");
   assert.equal(await AuctionDeliveryAuditEvent.countDocuments({ auction: auctionId, toStatus: "preparing" }), 1);
 });
+
+integration("delivery audit history is admin-only, ordered, and excludes winner address", async () => {
+  const url = `${base}/api/auctions/admin/fulfillments/${auctionId}/delivery-audit`;
+  const get = async user => {
+    const response = await fetch(url, {
+      headers: user ? { authorization: `Bearer ${token(user)}` } : {}
+    });
+    return { status: response.status, body: await response.json(), cache: response.headers.get("cache-control") };
+  };
+  assert.equal((await get(null)).status, 401);
+  assert.equal((await get(customer)).status, 403);
+  const result = await get(admin);
+  assert.equal(result.status, 200);
+  assert.equal(result.cache, "no-store");
+  assert.equal(result.body.auctionId, String(auctionId));
+  assert.deepEqual(result.body.items.map(item => item.toStatus), ["preparing", "shipped", "delivered"]);
+  for (const item of result.body.items) {
+    assert.equal(item.actorId, String(admin._id));
+    assert.ok(item.occurredAt);
+    assert.deepEqual(Object.keys(item).sort(), ["actorId", "fromStatus", "occurredAt", "toStatus"].sort());
+  }
+  assert.equal((await fetch(`${base}/api/auctions/admin/fulfillments/invalid/delivery-audit`, {
+    headers: { authorization: `Bearer ${token(admin)}` }
+  })).status, 400);
+  assert.equal((await fetch(`${base}/api/auctions/admin/fulfillments/${new mongoose.Types.ObjectId()}/delivery-audit`, {
+    headers: { authorization: `Bearer ${token(admin)}` }
+  })).status, 404);
+});
