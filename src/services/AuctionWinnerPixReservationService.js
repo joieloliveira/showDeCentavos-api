@@ -41,6 +41,15 @@ export async function reserveAuctionWinnerPixAttempt({ auction, winnerId, now = 
         result = { reserved: true, paymentId: String(created._id), logicalChargeKey: plan.logicalChargeKey };
       }
       if (result.reserved) {
+        // Keep fulfillment and payment in the same pending state, so a later
+        // independently verified provider confirmation can pass strict policy.
+        const updated = await AuctionFulfillment.updateOne({
+          _id: fulfillment._id, auction: auction._id, winner: winnerId,
+          winningPriceCents: plan.amountCents, paymentStatus: "not_started",
+        }, { $set: { paymentStatus: "pending" } }, { session });
+        if (updated.modifiedCount !== 1) {
+          throw new Error("Fulfillment reservation transition failed; rolling back PIX reservation.");
+        }
         const [attempt] = await AuctionWinnerPixAttempt.create([{
           payment: result.paymentId,
           auction: auction._id,
