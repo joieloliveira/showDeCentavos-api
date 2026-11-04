@@ -224,6 +224,35 @@ router.get("/admin/fulfillments", auth, isAdmin, async (req, res) => {
 });
 
 // Administrative delivery transitions. Payment status is never changed by this route.
+// Histórico de alterações de entrega: somente administradores, sem dados pessoais do vencedor.
+router.get("/admin/fulfillments/:auctionId/delivery-audit", auth, isAdmin, async (req, res) => {
+  const mongoose = (await import("mongoose")).default;
+  if (!mongoose.isValidObjectId(req.params.auctionId)) {
+    return res.status(400).json({ message: "Identificador de leilão inválido." });
+  }
+  try {
+    const fulfillment = await AuctionFulfillment.exists({ auction: req.params.auctionId });
+    if (!fulfillment) return res.status(404).json({ message: "Arremate não encontrado." });
+    const events = await AuctionDeliveryAuditEvent.find({ auction: req.params.auctionId })
+      .select("actor fromStatus toStatus occurredAt -_id")
+      .sort({ occurredAt: 1, toStatus: 1 })
+      .lean();
+    res.set("Cache-Control", "no-store");
+    return res.json({
+      auctionId: String(req.params.auctionId),
+      items: events.map(event => ({
+        actorId: String(event.actor),
+        fromStatus: event.fromStatus,
+        toStatus: event.toStatus,
+        occurredAt: event.occurredAt
+      }))
+    });
+  } catch (error) {
+    console.error("Erro ao consultar auditoria de entrega:", error);
+    return res.status(500).json({ message: "Não foi possível consultar auditoria de entrega." });
+  }
+});
+
 router.patch("/admin/fulfillments/:auctionId/delivery", auth, isAdmin, async (req, res) => {
   if (process.env.AUCTION_DELIVERY_MANAGEMENT_ENABLED !== "true") {
     return res.status(503).json({ message: "Gestão de entregas ainda não habilitada." });
