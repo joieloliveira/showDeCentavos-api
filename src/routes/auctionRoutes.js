@@ -5,6 +5,8 @@ import auth from "../middlewares/auth.js";
 import Bid from "../models/Bid.js";
 import Auction from "../models/Auction.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
+import AuctionWinnerPayment from "../models/AuctionWinnerPayment.js";
+import AuctionWinnerPixAttempt from "../models/AuctionWinnerPixAttempt.js";
 import AuctionDeliveryAuditEvent from "../models/AuctionDeliveryAuditEvent.js";
 import User from "../models/User.js";
 import { auctionPaymentPreview } from "../services/auctionPaymentPreview.js";
@@ -204,6 +206,52 @@ router.put("/my/wins/:auctionId/address", auth, async (req, res) => {
     if (error.code === 11000) return res.status(409).json({ message: "Arremate atualizado simultaneamente. Tente novamente." });
     console.error("Erro ao salvar endereço do arremate:", error);
     return res.status(500).json({ message: "Não foi possível salvar o endereço." });
+  }
+});
+
+
+// Read-only financial queue for active administrators. Never exposes provider
+// credentials, PIX payloads, buyer contact details or payment write actions.
+router.get("/admin/pix-monitor", auth, isAdmin, async (req, res) => {
+  try {
+    const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.page, 10) || 1));
+    const limit = 20;
+    const status = req.query.status;
+    const allowed = ["not_started", "pending", "paid", "failed", "refunded", "cancelled"];
+    if (status !== undefined && (typeof status !== "string" || !allowed.includes(status))) {
+      return res.status(400).json({ message: "Filtro de pagamento inválido." });
+    }
+    const filter = status ? { status } : {};
+    const [total, payments] = await Promise.all([
+      AuctionWinnerPayment.countDocuments(filter),
+      AuctionWinnerPayment.find(filter)
+        .select("auction winner amountCents status processedAt createdAt")
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit).limit(limit).lean()
+    ]);
+    const attempts = await AuctionWinnerPixAttempt.find({
+      payment: { $in: payments.map(payment => payment._id) }
+    }).select("payment state updatedAt").lean();
+    const attemptByPayment = new Map(attempts.map(attempt => [String(attempt.payment), attempt]));
+    res.set("Cache-Control", "no-store");
+    return res.json({
+      page, limit, total,
+      items: payments.map(payment => ({
+        paymentId: String(payment._id),
+        auctionId: String(payment.auction),
+        amountCents: payment.amountCents,
+        status: payment.status,
+        createdAt: payment.createdAt,
+        processedAt: payment.processedAt ?? null,
+        attemptState: attemptByPayment.get(String(payment._id))?.state ?? null,
+        requiresReview: ["request_unknown", "reconciliation_required"].includes(
+          attemptByPayment.get(String(payment._id))?.state
+        ),
+      }))
+    });
+  } catch (error) {
+    console.error("Erro ao consultar monitor financeiro de leilões:", error);
+    return res.status(500).json({ message: "Não foi possível consultar o monitor financeiro." });
   }
 });
 
