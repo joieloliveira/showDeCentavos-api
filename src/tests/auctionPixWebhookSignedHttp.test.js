@@ -10,7 +10,7 @@ const requestId = "local-webhook-request-123";
 
 function signedHeaders(dataId) {
   const ts = String(Math.floor(Date.now() / 1000));
-  const manifest = `id:${String(dataId).toLowerCase()};request-id:${requestId};ts:${ts};`;
+  const manifest = `id:${String(dataId)};request-id:${requestId};ts:${ts};`;
   const signature = crypto.createHmac("sha256", secret).update(manifest).digest("hex");
   return {
     "content-type": "application/json",
