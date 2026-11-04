@@ -37,8 +37,8 @@ export async function reconcileVerifiedAuctionPix({ paymentId }) {
   // Existing processor verifies again within its MongoDB transaction.
   const result = await processVerifiedAuctionPix({
     paymentId: String(payment._id), providerOrder: verification.providerOrder,
+    reconcileAttempt: true,
   });
-  // Attempt state remains reconciliation_required until a separate audited
-  // finalization step is implemented; never silently clear a safety lock.
+  // Payment, fulfillment and attempt now transition in one MongoDB transaction.
   return result;
 }
