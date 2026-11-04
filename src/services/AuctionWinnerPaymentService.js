@@ -13,6 +13,8 @@ export async function processVerifiedAuctionPix({ paymentId, providerOrder }) {
   try {
     let outcome = { processed: false, reason: "NOT_ELIGIBLE" };
     await session.withTransaction(async () => {
+      // withTransaction may retry its callback after a transient write conflict.
+      outcome = { processed: false, reason: "NOT_ELIGIBLE" };
       const payment = await AuctionWinnerPayment.findById(paymentId).session(session);
       if (!payment) return;
       const fulfillment = await AuctionFulfillment.findById(payment.fulfillment).session(session);
