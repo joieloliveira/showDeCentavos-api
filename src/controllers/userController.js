@@ -344,3 +344,20 @@ export const updateAdminUserRole = async (req, res) => {
     });
   }
 };
+export const updatePublicNickname = async (req, res) => {
+  try {
+    const nickname = req.body?.publicNickname;
+    if (typeof nickname !== "string" || !/^[A-Za-z0-9_]{3,30}$/.test(nickname)) {
+      return res.status(400).json({ message: "Apelido deve conter 3 a 30 letras, números ou _." });
+    }
+    const user = await User.findByIdAndUpdate(req.user.id,
+      { $set: { publicNickname: nickname } },
+      { new: true, runValidators: true, collation: { locale: "en", strength: 2 } });
+    if (!user) return res.status(404).json({ message: "Usuário não encontrado." });
+    return res.json({ publicNickname: user.publicNickname });
+  } catch (error) {
+    if (error?.code === 11000) return res.status(409).json({ message: "Apelido já utilizado." });
+    console.error("Erro ao atualizar apelido:", error);
+    return res.status(500).json({ message: "Erro interno do servidor." });
+  }
+};

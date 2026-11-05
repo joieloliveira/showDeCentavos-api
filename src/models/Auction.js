@@ -90,7 +90,7 @@ const auctionSchema = new mongoose.Schema(
   }
 );
 
-auctionSchema.index({ status: 1, endsAt: 1 });
+// Scheduler scans scheduled auctions by start time and active auctions by expiry.\nauctionSchema.index({ status: 1, startsAt: 1 }, { partialFilterExpression: { status: 'scheduled' } });\nauctionSchema.index({ status: 1, endsAt: 1 });
 
 const Auction =
   mongoose.models.Auction ||

@@ -1,5 +1,7 @@
 
 import Auction from "../models/Auction.js";
+import { recordAuctionAuditEvent } from "./AuctionAuditService.js";
+import { publishAuctionEvent } from "./AuctionEventsService.js";
 
 let schedulerInterval = null;
 let isProcessing = false;
@@ -12,51 +14,63 @@ export const processAuctionSchedules = async () => {
   try {
     const now = new Date();
 
-    // Ativar leilões cujo período de espera terminou
-    const activatedResult = await Auction.updateMany(
-      {
-        status: "scheduled",
-        waitingStartedAt: { $ne: null },
-        startsAt: { $lte: now },
-      },
-      {
-        $set: {
-          status: "active",
-        },
+    // Conditional per-auction updates ensure only the process that changes
+    // the state broadcasts the transition (also safe with multiple workers).
+    const scheduled = await Auction.find({
+      status: "scheduled", waitingStartedAt: { $ne: null }, startsAt: { $lte: now },
+    }).select("_id").lean();
+    let activated = 0;
+    for (const item of scheduled) {
+      const auction = await Auction.findOneAndUpdate(
+        { _id: item._id, status: "scheduled", waitingStartedAt: { $ne: null }, startsAt: { $lte: now } },
+        { $set: { status: "active" } },
+        { returnDocument: "after" }
+      );
+      if (!auction) continue;
+      activated++;
+      try {
+        const auditSaved = await recordAuctionAuditEvent(auction._id, "activated", now, "scheduler");
+        if (!auditSaved) console.error("Auditoria pendente para leilão:", String(auction._id), "activated");
+      } catch (auditError) {
+        // The state transition already committed. Do not suppress the SSE
+        // notification or prevent processing other auctions.
+        console.error("Falha ao registrar auditoria do leilão:", auction._id, auditError);
       }
-    );
-
-    if (activatedResult.modifiedCount > 0) {
-      console.log(
-        `${activatedResult.modifiedCount} leilão(ões) ativado(s) automaticamente.`
-      );
+      publishAuctionEvent(auction._id, {
+        status: auction.status, currentPriceCents: auction.currentPriceCents,
+        bidCount: auction.bidCount, startsAt: auction.startsAt, endsAt: auction.endsAt,
+      });
     }
+    if (activated) console.log(`${activated} leilão(ões) ativado(s) automaticamente.`);
 
-    // Encerrar leilões cujo cronômetro terminou
-    const finishedResult = await Auction.updateMany(
-      {
-        status: "active",
-        bidCount: { $gt: 0 },
-        endsAt: { $lte: now },
-        lastBidder: { $ne: null },
-      },
-
-      [
-        {
-          $set: {
-            status: "finished",
-            winner: "$lastBidder",
-          },
-        },
-      ],
-      { updatePipeline: true }
-    );
-
-    if (finishedResult.modifiedCount > 0) {
-      console.log(
-        `${finishedResult.modifiedCount} leilão(ões) encerrado(s) automaticamente.`
+    const expiring = await Auction.find({
+      status: "active", bidCount: { $gt: 0 }, endsAt: { $lte: now },
+      lastBidder: { $ne: null },
+    }).select("_id").lean();
+    let finished = 0;
+    for (const item of expiring) {
+      const auction = await Auction.findOneAndUpdate(
+        { _id: item._id, status: "active", bidCount: { $gt: 0 },
+          endsAt: { $lte: now }, lastBidder: { $ne: null } },
+        [{ $set: { status: "finished", winner: "$lastBidder" } }],
+        { returnDocument: "after", updatePipeline: true }
       );
+      if (!auction) continue;
+      finished++;
+      try {
+        const auditSaved = await recordAuctionAuditEvent(auction._id, "finished", now, "scheduler");
+        if (!auditSaved) console.error("Auditoria pendente para leilão:", String(auction._id), "finished");
+      } catch (auditError) {
+        // The state transition already committed. Do not suppress the SSE
+        // notification or prevent processing other auctions.
+        console.error("Falha ao registrar auditoria do leilão:", auction._id, auditError);
+      }
+      publishAuctionEvent(auction._id, {
+        status: auction.status, currentPriceCents: auction.currentPriceCents,
+        bidCount: auction.bidCount, startsAt: auction.startsAt, endsAt: auction.endsAt,
+      });
     }
+    if (finished) console.log(`${finished} leilão(ões) encerrado(s) automaticamente.`);
   } catch (error) {
     console.error("Erro ao processar agendamento de leilões:", error);
   } finally {
