@@ -216,6 +216,13 @@ router.get("/admin/pix-monitor", auth, isAdmin, async (req, res) => {
   try {
     const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.page, 10) || 1));
     const limit = 20;
+    // Reject malformed or duplicate status parameters, including status[]=paid.
+    // Express query parsers may otherwise silently ignore bracketed keys.
+    const rawStatusKeys = [...new URL(req.originalUrl, "http://localhost").searchParams.keys()]
+      .filter(key => key === "status" || key.startsWith("status["));
+    if (rawStatusKeys.length > 1 || rawStatusKeys.some(key => key !== "status")) {
+      return res.status(400).json({ message: "Filtro de pagamento inválido." });
+    }
     const status = req.query.status;
     const allowed = ["not_started", "pending", "paid", "failed", "refunded", "cancelled"];
     if (status !== undefined && (typeof status !== "string" || !allowed.includes(status))) {
