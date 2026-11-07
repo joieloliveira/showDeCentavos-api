@@ -121,3 +121,45 @@ integration("PIX monitor validates filters and returns only safe read-only field
   assert.equal(await AuctionWinnerPayment.countDocuments(), 2);
   assert.equal(await AuctionWinnerPixAttempt.countDocuments(), 2);
 });
+
+integration("PIX reconciliation detail is admin-only, read-only and flags ledger mismatches", async () => {
+  const auction = new mongoose.Types.ObjectId();
+  const fulfillmentId = new mongoose.Types.ObjectId();
+  const payment = await AuctionWinnerPayment.create({
+    auction, fulfillment: fulfillmentId, winner: customer._id,
+    amountCents: 480, status: "pending", providerOrderId: "sensitive-order-detail"
+  });
+  await AuctionWinnerPixAttempt.create({
+    auction, payment: payment._id, idempotencyKey: "sensitive-attempt-detail",
+    state: "request_unknown", lastError: "sensitive-provider-error-detail"
+  });
+  const url = `${base}/api/auctions/admin/pix-monitor/${payment._id}`;
+  const detail = async user => {
+    const response = await fetch(url, {
+      headers: user ? { authorization: `Bearer ${token(user)}` } : {}
+    });
+    return { status: response.status, body: await response.json(),
+      cache: response.headers.get("cache-control") };
+  };
+  assert.equal((await detail(null)).status, 401);
+  assert.equal((await detail(customer)).status, 403);
+  assert.equal((await detail(inactive)).status, 403);
+  const invalid = await fetch(`${base}/api/auctions/admin/pix-monitor/not-an-id`, {
+    headers: { authorization: `Bearer ${token(admin)}` }
+  });
+  assert.equal(invalid.status, 400);
+  const result = await detail(admin);
+  assert.equal(result.status, 200);
+  assert.equal(result.cache, "no-store");
+  assert.equal(result.body.requiresReview, true);
+  assert.equal(result.body.ledgerConsistent, false);
+  assert.equal(result.body.providerVerification, "not_performed");
+  assert.equal(result.body.attempt.state, "request_unknown");
+  assert.equal(result.body.fulfillment, null);
+  const serialized = JSON.stringify(result.body);
+  for (const secret of ["sensitive-order-detail", "sensitive-attempt-detail", "sensitive-provider-error-detail"]) {
+    assert.equal(serialized.includes(secret), false);
+  }
+  assert.equal((await AuctionWinnerPayment.findById(payment._id)).status, "pending");
+  assert.equal((await AuctionWinnerPixAttempt.findOne({ payment: payment._id })).state, "request_unknown");
+});
