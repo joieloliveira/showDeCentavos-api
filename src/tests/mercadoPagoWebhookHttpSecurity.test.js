@@ -244,3 +244,60 @@ mongoTest("late approved charge on cancelled order returns retryable error witho
     await mongoose.disconnect();
   }
 });
+
+mongoTest("approved amount mismatch is persisted once across webhook retries", async () => {
+  await mongoose.connect(mongoUri, {
+    dbName: `webhook_amount_mismatch_${process.pid}_${Date.now()}`,
+    serverSelectionTimeoutMS: 5000
+  });
+  try {
+    const seller = new mongoose.Types.ObjectId();
+    const product = await Product.create({
+      seller, name: "Produto encerrado", slug: `late-approval-${Date.now()}`,
+      description: "Teste de reconciliação", price: 100, stock: 2, reservedStock: 0
+    });
+    const order = await Order.create({
+      buyer: new mongoose.Types.ObjectId(),
+      buyerSnapshot: { name: "Comprador", email: "buyer@example.test" },
+      shippingAddress: {
+        recipientName: "Comprador", phone: "91999999999", zipCode: "66000000",
+        street: "Rua Teste", number: "1", neighborhood: "Centro",
+        city: "Belém", state: "PA"
+      },
+      items: [{
+        product: product._id, seller, name: "Produto encerrado",
+        quantity: 1, unitPrice: 100, total: 100,
+        platformFeePercent: 10, platformFeeAmount: 10, sellerAmount: 90
+      }],
+      subtotal: 100, total: 100, platformFeeTotal: 10, sellerTotal: 90,
+      stockReservation: { reserved: false, releasedAt: new Date() },
+      paymentStatus: "pending",
+      payment: { providerOrderId: orderId }
+    });
+    await withWebhook({
+      orderId, externalReference: String(order._id),
+      normalizedStatus: "approved", status: "approved",
+      payment: { id: "PAY-LATE-APPROVAL" },
+      raw: { total_amount: "99.00", currency_id: "BRL", transactions: { payments: [{ amount: "99.00" }] } }
+    }, async send => {
+      assert.equal((await send()).status, 500);
+      assert.equal((await send()).status, 500);
+    });
+    const incidents = await FinancialReconciliationIncident.find({ order: order._id });
+    assert.equal(incidents.length, 1);
+    assert.equal(incidents[0].status, "pending");
+    assert.equal(incidents[0].reason, "approved_amount_mismatch");
+    assert.equal(incidents[0].occurrences, 2);
+    assert.equal(incidents[0].providerOrderId, orderId);
+    const updatedOrder = await Order.findById(order._id);
+    const updatedProduct = await Product.findById(product._id);
+    assert.equal(updatedOrder.paymentStatus, "pending");
+    assert.equal(updatedOrder.payment.processedAt, null);
+    assert.equal(updatedProduct.stock, 2);
+    assert.equal(updatedProduct.reservedStock, 0);
+    assert.equal(updatedProduct.sales, 0);
+  } finally {
+    if (mongoose.connection.readyState === 1) await mongoose.connection.dropDatabase();
+    await mongoose.disconnect();
+  }
+});
