@@ -106,6 +106,16 @@ integration("PIX monitor validates filters and returns only safe read-only field
   assert.equal(filtered.status, 200);
   assert.equal(filtered.body.total, 1);
   assert.equal(filtered.body.items[0].paymentId, String(p1._id));
+  assert.equal((await get(admin, "?review=unknown")).status, 400);
+  assert.equal((await get(admin, "?review[]=required")).status, 400);
+  assert.equal((await get(admin, "?review=required&review=required")).status, 400);
+  const reviewOnly = await get(admin, "?review=required");
+  assert.equal(reviewOnly.status, 200);
+  assert.equal(reviewOnly.body.total, 1);
+  assert.equal(reviewOnly.body.items[0].paymentId, String(p1._id));
+  assert.equal(reviewOnly.body.items[0].requiresReview, true);
+  assert.equal((await get(admin, "?review=required&status=paid")).body.total, 0);
+  assert.equal((await get(admin, "?review=required&status=pending")).body.total, 1);
   assert.equal((await get(admin, "?status=failed")).body.total, 0);
   assert.equal((await get(admin, "?page=2")).body.items.length, 0);
   assert.equal(await AuctionWinnerPayment.countDocuments(), 2);
