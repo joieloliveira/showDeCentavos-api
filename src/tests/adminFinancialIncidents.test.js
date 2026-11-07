@@ -23,7 +23,7 @@ integration("financial incidents endpoint is admin-only, filtered, paginated and
       serverSelectionTimeoutMS: 5000
     });
     const admin = await User.create({ name: "Financial Admin", email: "financial-admin@example.test", role: "admin", isActive: true });
-    const regular = await User.create({ name: "Regular Buyer", email: "regular-buyer@example.test", role: "user", isActive: true });
+    const regular = await User.create({ name: "Regular Buyer", email: "regular-buyer@example.test", role: "customer", isActive: true });
     const order = new mongoose.Types.ObjectId();
     for (const [i, status] of ["pending", "pending", "resolved"].entries()) {
       await FinancialReconciliationIncident.create({
