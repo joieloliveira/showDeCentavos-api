@@ -245,6 +245,40 @@ export const mercadoPagoOrderWebhook = async (
       return res.sendStatus(200);
     }
 
+    // A paid provider charge must never be silently acknowledged after
+    // local cancellation/stock release. Keep the webhook retryable and
+    // surface the mismatch for manual financial reconciliation.
+    if (
+      providerOrder.normalizedStatus === "approved" &&
+      ["cancelled", "failed"].includes(currentOrder.paymentStatus)
+    ) {
+      console.error("RECONCILIATION_REQUIRED: approved provider charge on closed order", {
+        internalOrderId: String(currentOrder._id),
+        providerOrderId: String(providerOrder.orderId),
+        paymentStatus: currentOrder.paymentStatus,
+      });
+      return res.sendStatus(500);
+    }
+
+    // Reject a different provider charge from rewriting an already-linked
+    // order. Never use externalReference alone as proof of charge identity.
+    const linkedProviderOrderId =
+      currentOrder.payment?.processedProviderOrderId ||
+      currentOrder.payment?.providerOrderId ||
+      currentOrder.payment?.processedMercadoPagoOrderId ||
+      currentOrder.payment?.mercadoPagoOrderId;
+    if (
+      linkedProviderOrderId &&
+      String(linkedProviderOrderId) !== String(providerOrder.orderId)
+    ) {
+      console.error("Webhook charge identity mismatch", {
+        internalOrderId: String(currentOrder._id),
+        linkedProviderOrderId: String(linkedProviderOrderId),
+        incomingProviderOrderId: String(providerOrder.orderId),
+      });
+      return res.sendStatus(500);
+    }
+
     // Ignore delayed pending/failed/cancelled notifications after settlement.
     // A refund remains an explicit state transition handled below.
     if (shouldIgnoreOrderWebhookState(currentOrder, providerOrder.normalizedStatus)) {
