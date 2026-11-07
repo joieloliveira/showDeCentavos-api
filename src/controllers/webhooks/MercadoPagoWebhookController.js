@@ -20,6 +20,28 @@ import { processApprovedMercadoPagoWalletDeposit } from "../../services/MercadoP
 
 const paymentProvider = MercadoPagoProvider;
 
+const recordClosedOrderApproval = async (order, providerOrder) => {
+  await FinancialReconciliationIncident.findOneAndUpdate(
+    {
+      order: order._id,
+      provider: "mercadopago",
+      providerOrderId: String(providerOrder.orderId),
+      reason: "late_approval_after_closure",
+    },
+    {
+      $set: { lastSeenAt: new Date() },
+      $setOnInsert: { status: "pending", firstSeenAt: new Date() },
+      $inc: { occurrences: 1 },
+    },
+    { upsert: true, returnDocument: "after" }
+  );
+  console.error("RECONCILIATION_REQUIRED: approved provider charge on closed order", {
+    internalOrderId: String(order._id),
+    providerOrderId: String(providerOrder.orderId),
+    paymentStatus: order.paymentStatus,
+  });
+};
+
 export const mercadoPagoOrderWebhook = async (
   req,
   res
@@ -253,25 +275,7 @@ export const mercadoPagoOrderWebhook = async (
       providerOrder.normalizedStatus === "approved" &&
       ["cancelled", "failed"].includes(currentOrder.paymentStatus)
     ) {
-      await FinancialReconciliationIncident.findOneAndUpdate(
-        {
-          order: currentOrder._id,
-          provider: "mercadopago",
-          providerOrderId: String(providerOrder.orderId),
-          reason: "late_approval_after_closure",
-        },
-        {
-          $set: { lastSeenAt: new Date() },
-          $setOnInsert: { status: "pending", firstSeenAt: new Date() },
-          $inc: { occurrences: 1 },
-        },
-        { upsert: true, returnDocument: "after" }
-      );
-      console.error("RECONCILIATION_REQUIRED: approved provider charge on closed order", {
-        internalOrderId: String(currentOrder._id),
-        providerOrderId: String(providerOrder.orderId),
-        paymentStatus: currentOrder.paymentStatus,
-      });
+      await recordClosedOrderApproval(currentOrder, providerOrder);
       return res.sendStatus(500);
     }
 
@@ -337,11 +341,21 @@ export const mercadoPagoOrderWebhook = async (
       providerOrder.normalizedStatus ===
       "approved"
     ) {
-      await processApprovedOrder({
+      const approval = await processApprovedOrder({
         internalOrderId,
         providerOrder,
         notificationId,
       });
+
+      // The order may have been cancelled after the initial read but before
+      // the transactional approval. Never acknowledge a paid charge silently.
+      if (!approval.processed) {
+        const latestOrder = await Order.findById(internalOrderId);
+        if (latestOrder && ["cancelled", "failed"].includes(latestOrder.paymentStatus)) {
+          await recordClosedOrderApproval(latestOrder, providerOrder);
+          return res.sendStatus(500);
+        }
+      }
 
       return res.sendStatus(200);
     }
