@@ -64,7 +64,12 @@ try {
     const fulfillment = await AuctionFulfillment.create({
       auction, winner, product: new mongoose.Types.ObjectId(),
       winningPriceCents: index * 1000 + 250, wonAt: new Date(),
-      paymentStatus: status, deliveryStatus
+      paymentStatus: status, deliveryStatus,
+      ...(index === 2 ? { addressSubmittedAt: new Date(), shippingAddress: {
+        recipientName: "Destinatário Fictício", phone: "91999999999",
+        zipCode: "66000000", street: "Rua de Homologação", number: "10",
+        neighborhood: "Bairro Fictício", city: "Belém", state: "PA"
+      } } : {})
     });
     const payment = await AuctionWinnerPayment.create({
       auction, fulfillment: fulfillment._id, winner,
