@@ -4,8 +4,8 @@ export const createAuthRateLimiter = ({ maxAttempts, windowMs }) => {
   let requests = 0;
   return (req, res, next) => {
     const now = Date.now();
-    // Use the direct socket address by default; do not trust spoofable forwarded headers.
-    const ip = req.socket?.remoteAddress || "unknown";
+    // Express resolves req.ip using only the explicitly trusted proxy, if configured.
+    const ip = req.ip || req.socket?.remoteAddress || "unknown";
     const key = ip;
     if (++requests % 100 === 0) {
       for (const [entry, value] of attempts) {
