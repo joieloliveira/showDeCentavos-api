@@ -156,7 +156,8 @@ mongoTest("parallel HTTP approval and cancellation preserve a single inventory o
       orderId, externalReference: String(order._id),
       normalizedStatus: call === 1 ? "approved" : "cancelled",
       status: call === 1 ? "approved" : "cancelled",
-      payment: { id: "PAY-RACE-TEST" }
+      payment: { id: "PAY-RACE-TEST" },
+      raw: { total_amount: "100.00", currency_id: "BRL", transactions: { payments: [{ amount: "100.00" }] } }
     }), async send => {
       const responses = await Promise.all([send(), send()]);
       responseStatuses = responses.map(response => response.status);
@@ -220,7 +221,8 @@ mongoTest("late approved charge on cancelled order returns retryable error witho
     await withWebhook({
       orderId, externalReference: String(order._id),
       normalizedStatus: "approved", status: "approved",
-      payment: { id: "PAY-LATE-APPROVAL" }
+      payment: { id: "PAY-LATE-APPROVAL" },
+      raw: { total_amount: "100.00", currency_id: "BRL", transactions: { payments: [{ amount: "100.00" }] } }
     }, async send => {
       assert.equal((await send()).status, 500);
       assert.equal((await send()).status, 500);
