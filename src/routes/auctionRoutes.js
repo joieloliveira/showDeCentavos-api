@@ -218,17 +218,27 @@ router.get("/admin/pix-monitor", auth, isAdmin, async (req, res) => {
     const limit = 20;
     // Reject malformed or duplicate status parameters, including status[]=paid.
     // Express query parsers may otherwise silently ignore bracketed keys.
-    const rawStatusKeys = [...new URL(req.originalUrl, "http://localhost").searchParams.keys()]
-      .filter(key => key === "status" || key.startsWith("status["));
-    if (rawStatusKeys.length > 1 || rawStatusKeys.some(key => key !== "status")) {
-      return res.status(400).json({ message: "Filtro de pagamento inválido." });
+    const rawKeys = [...new URL(req.originalUrl, "http://localhost").searchParams.keys()];
+    const rawStatusKeys = rawKeys.filter(key => key === "status" || key.startsWith("status["));
+    const rawReviewKeys = rawKeys.filter(key => key === "review" || key.startsWith("review["));
+    if (rawStatusKeys.length > 1 || rawStatusKeys.some(key => key !== "status") ||
+        rawReviewKeys.length > 1 || rawReviewKeys.some(key => key !== "review")) {
+      return res.status(400).json({ message: "Filtro financeiro inválido." });
     }
     const status = req.query.status;
+    const review = req.query.review;
     const allowed = ["not_started", "pending", "paid", "failed", "refunded", "cancelled"];
-    if (status !== undefined && (typeof status !== "string" || !allowed.includes(status))) {
-      return res.status(400).json({ message: "Filtro de pagamento inválido." });
+    if ((status !== undefined && (typeof status !== "string" || !allowed.includes(status))) ||
+        (review !== undefined && review !== "required")) {
+      return res.status(400).json({ message: "Filtro financeiro inválido." });
     }
     const filter = status ? { status } : {};
+    if (review === "required") {
+      const reviewPayments = await AuctionWinnerPixAttempt.distinct("payment", {
+        state: { $in: ["request_unknown", "reconciliation_required"] },
+      });
+      filter._id = { $in: reviewPayments };
+    }
     const [total, payments] = await Promise.all([
       AuctionWinnerPayment.countDocuments(filter),
       AuctionWinnerPayment.find(filter)
