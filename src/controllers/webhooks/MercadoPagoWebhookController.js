@@ -12,7 +12,7 @@ import {
 
 import MercadoPagoProvider from "../../services/payments/MercadoPagoProvider.js";
 import { validateWebhookProviderOrder } from "../../services/payments/validateWebhookProviderOrder.js";
-import { shouldIgnoreOrderWebhookState } from "../../services/payments/orderWebhookStateGuard.js";
+import { shouldIgnoreOrderWebhookState, canCancelReservedOrder } from "../../services/payments/orderWebhookStateGuard.js";
 
 import { processApprovedOrder } from "../../services/OrderPaymentService.js";
 import { processApprovedMercadoPagoWalletDeposit } from "../../services/MercadoPagoWalletDepositService.js";
@@ -329,9 +329,7 @@ export const mercadoPagoOrderWebhook = async (
 
           // Recheck inside the transaction: an approval/refund may have
           // committed after the initial webhook read.
-          if (order.paymentStatus === "paid" ||
-              order.paymentStatus === "refunded" ||
-              order.payment?.processedAt) {
+          if (!canCancelReservedOrder(order)) {
             return;
           }
 
