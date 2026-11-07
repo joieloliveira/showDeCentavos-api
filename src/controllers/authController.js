@@ -82,6 +82,10 @@ export const login = async (req, res) => {
       });
     }
 
+    if (!user.isActive) {
+      return res.status(403).json({ message: "Esta conta está desativada." });
+    }
+
     if (!user.password) {
       return res.status(401).json({
         message:
@@ -289,6 +293,9 @@ export const googleLogin = async (req, res) => {
     }).select('+googleId');
 
     if (user) {
+      if (!user.isActive) {
+        return res.status(403).json({ message: "Esta conta está desativada." });
+      }
       if (
         user.googleId &&
         user.googleId !== payload.sub
