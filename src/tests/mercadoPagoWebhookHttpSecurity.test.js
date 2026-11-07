@@ -151,6 +151,7 @@ mongoTest("parallel HTTP approval and cancellation preserve a single inventory o
       stockReservation: { reserved: true, reservedAt: new Date() },
       paymentStatus: "pending"
     });
+    let responseStatuses = [];
     await withWebhook(call => ({
       orderId, externalReference: String(order._id),
       normalizedStatus: call === 1 ? "approved" : "cancelled",
@@ -158,7 +159,8 @@ mongoTest("parallel HTTP approval and cancellation preserve a single inventory o
       payment: { id: "PAY-RACE-TEST" }
     }), async send => {
       const responses = await Promise.all([send(), send()]);
-      assert.ok(responses.every(response => [200, 500].includes(response.status)));
+      responseStatuses = responses.map(response => response.status);
+      assert.ok(responseStatuses.every(status => [200, 500].includes(status)));
     });
     const updatedOrder = await Order.findById(order._id);
     const updatedProduct = await Product.findById(product._id);
@@ -171,6 +173,14 @@ mongoTest("parallel HTTP approval and cancellation preserve a single inventory o
       assert.equal(updatedOrder.paymentStatus, "cancelled");
       assert.equal(updatedProduct.stock, 2);
       assert.equal(updatedProduct.sales, 0);
+      // If the provider approved charge was rejected after cancellation,
+      // it must be recorded for reconciliation rather than silently lost.
+      const incidents = await FinancialReconciliationIncident.find({ order: order._id });
+      if (responseStatuses.includes(500)) {
+        assert.equal(incidents.length, 1);
+        assert.equal(incidents[0].status, "pending");
+        assert.equal(incidents[0].providerOrderId, orderId);
+      }
     }
   } finally {
     if (mongoose.connection.readyState === 1) await mongoose.connection.dropDatabase();
