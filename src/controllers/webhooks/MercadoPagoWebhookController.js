@@ -144,7 +144,14 @@ export const mercadoPagoOrderWebhook = async (
         "Não foi possível consultar a Order no Mercado Pago."
       );
 
-      return res.sendStatus(200);
+      return res.sendStatus(500);
+    }
+
+    // A notificação assinada deve corresponder exatamente à Order
+    // consultada no provedor. Nunca processe outra cobrança por engano.
+    if (String(providerOrder.orderId || "") !== String(mercadoPagoOrderId)) {
+      console.error("Webhook Mercado Pago: divergência no ID da Order consultada.");
+      return res.sendStatus(500);
     }
 
     /*
