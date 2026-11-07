@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import { allowedCorsOrigins } from "./config/productionSecurity.js";
+import { configureTrustedProxy } from "./config/trustedProxy.js";
 
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
@@ -17,6 +18,7 @@ import auctionRoutes from "./routes/auctionRoutes.js";
 import walletRoutes from "./routes/walletRoutes.js";
 
 const app = express();
+configureTrustedProxy(app);
 
 const allowedOrigins = allowedCorsOrigins();
 app.use(cors({ origin(origin, callback) {
