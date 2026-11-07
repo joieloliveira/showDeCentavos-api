@@ -9,3 +9,10 @@ export function shouldIgnoreOrderWebhookState(order, normalizedStatus) {
   }
   return false;
 }
+
+export function canCancelReservedOrder(order) {
+  return Boolean(order &&
+    order.paymentStatus !== "paid" &&
+    order.paymentStatus !== "refunded" &&
+    !order.payment?.processedAt);
+}
