@@ -272,6 +272,49 @@ router.get("/admin/pix-monitor", auth, isAdmin, async (req, res) => {
   }
 });
 
+// Read-only reconciliation detail: compare local ledger, attempt and fulfillment.
+// No provider requests, payment mutations or sensitive provider identifiers.
+router.get("/admin/pix-monitor/:paymentId", auth, isAdmin, async (req, res) => {
+  try {
+    const mongoose = (await import("mongoose")).default;
+    if (!mongoose.isValidObjectId(req.params.paymentId)) {
+      return res.status(400).json({ message: "Identificador de pagamento inválido." });
+    }
+    const payment = await AuctionWinnerPayment.findById(req.params.paymentId)
+      .select("auction fulfillment amountCents status processedAt createdAt").lean();
+    if (!payment) return res.status(404).json({ message: "Pagamento não encontrado." });
+    const [attempt, fulfillment] = await Promise.all([
+      AuctionWinnerPixAttempt.findOne({ payment: payment._id })
+        .select("state createdAt updatedAt").lean(),
+      AuctionFulfillment.findById(payment.fulfillment)
+        .select("auction paymentStatus deliveryStatus addressSubmittedAt").lean()
+    ]);
+    const consistent = Boolean(fulfillment) &&
+      String(fulfillment.auction) === String(payment.auction) &&
+      fulfillment.paymentStatus === payment.status;
+    const requiresReview = ["request_unknown", "reconciliation_required"].includes(attempt?.state) ||
+      !consistent || (payment.status === "paid" && attempt && attempt.state !== "provider_confirmed");
+    res.set("Cache-Control", "no-store");
+    return res.json({
+      paymentId: String(payment._id), auctionId: String(payment.auction),
+      amountCents: payment.amountCents, status: payment.status,
+      createdAt: payment.createdAt, processedAt: payment.processedAt ?? null,
+      attempt: attempt ? { state: attempt.state, createdAt: attempt.createdAt, updatedAt: attempt.updatedAt } : null,
+      fulfillment: fulfillment ? {
+        paymentStatus: fulfillment.paymentStatus,
+        deliveryStatus: fulfillment.deliveryStatus,
+        hasAddress: Boolean(fulfillment.addressSubmittedAt)
+      } : null,
+      ledgerConsistent: consistent, requiresReview,
+      // Human review only; never infer provider approval from local database state.
+      providerVerification: "not_performed"
+    });
+  } catch (error) {
+    console.error("Erro ao consultar detalhe de reconciliação PIX:", error);
+    return res.status(500).json({ message: "Não foi possível consultar o detalhe financeiro." });
+  }
+});
+
 router.get("/admin/fulfillments", auth, isAdmin, async (req, res) => {
   try {
     const page = Math.max(1, Math.min(10000, Number.parseInt(req.query.page, 10) || 1));
