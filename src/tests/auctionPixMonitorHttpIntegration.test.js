@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 import auctionRoutes from "../routes/auctionRoutes.js";
 import AuctionWinnerPayment from "../models/AuctionWinnerPayment.js";
 import AuctionWinnerPixAttempt from "../models/AuctionWinnerPixAttempt.js";
+import AuctionFulfillment from "../models/AuctionFulfillment.js";
 import User from "../models/User.js";
 
 const uri = process.env.WALLET_TEST_MONGODB_URI || "";
@@ -162,4 +163,55 @@ integration("PIX reconciliation detail is admin-only, read-only and flags ledger
   }
   assert.equal((await AuctionWinnerPayment.findById(payment._id)).status, "pending");
   assert.equal((await AuctionWinnerPixAttempt.findOne({ payment: payment._id })).state, "request_unknown");
+});
+
+integration("stored fulfillment and payment appear consistently in admin list and detail", async () => {
+  const auction = new mongoose.Types.ObjectId();
+  const fulfillment = await AuctionFulfillment.create({
+    auction, winner: customer._id, product: new mongoose.Types.ObjectId(),
+    winningPriceCents: 725, wonAt: new Date(),
+    paymentStatus: "paid", deliveryStatus: "preparing",
+    addressSubmittedAt: new Date(),
+    shippingAddress: {
+      recipientName: "Test Private Name", phone: "91999999999",
+      zipCode: "66000000", street: "Private Street", number: "5",
+      neighborhood: "Private Neighborhood", city: "Belém", state: "PA"
+    }
+  });
+  const payment = await AuctionWinnerPayment.create({
+    auction, fulfillment: fulfillment._id, winner: customer._id,
+    amountCents: 725, status: "paid", processedAt: new Date(),
+    providerOrderId: "private-order-consistent", providerPaymentId: "private-pix-consistent"
+  });
+  await AuctionWinnerPixAttempt.create({
+    auction, payment: payment._id, idempotencyKey: "private-key-consistent",
+    state: "provider_confirmed", providerOrderId: "private-order-consistent"
+  });
+  const list = await get(admin, "?status=paid");
+  assert.equal(list.status, 200);
+  const listed = list.body.items.find(item => item.paymentId === String(payment._id));
+  assert.ok(listed);
+  assert.equal(listed.amountCents, 725);
+  assert.equal(listed.requiresReview, false);
+  const response = await fetch(`${base}/api/auctions/admin/pix-monitor/${payment._id}`, {
+    headers: { authorization: `Bearer ${token(admin)}` }
+  });
+  assert.equal(response.status, 200);
+  const detail = await response.json();
+  assert.equal(detail.paymentId, listed.paymentId);
+  assert.equal(detail.auctionId, listed.auctionId);
+  assert.equal(detail.ledgerConsistent, true);
+  assert.equal(detail.requiresReview, false);
+  assert.equal(detail.attempt.state, "provider_confirmed");
+  assert.deepEqual(detail.fulfillment, {
+    paymentStatus: "paid", deliveryStatus: "preparing", hasAddress: true
+  });
+  assert.equal(detail.providerVerification, "not_performed");
+  const serialized = JSON.stringify(detail);
+  for (const secret of ["private-order-consistent", "private-pix-consistent",
+    "private-key-consistent", "Test Private Name", "Private Street", "91999999999"]) {
+    assert.equal(serialized.includes(secret), false);
+  }
+  assert.equal((await AuctionWinnerPayment.findById(payment._id)).status, "paid");
+  assert.equal((await AuctionFulfillment.findById(fulfillment._id)).deliveryStatus, "preparing");
 });
