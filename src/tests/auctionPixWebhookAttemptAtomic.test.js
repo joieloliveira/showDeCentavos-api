@@ -73,3 +73,47 @@ integration("ordinary webhook cannot bypass reconciliation-required attempt", as
     assert.equal((await AuctionFulfillment.findById(fulfillment._id)).paymentStatus, "pending");
   });
 });
+
+integration("concurrent webhook confirmations commit exactly one durable attempt", async () => {
+  await isolated("concurrent", async () => {
+    const { payment, fulfillment, providerOrder } = await fixture();
+    const results = await Promise.allSettled(Array.from({ length: 6 }, () =>
+      processVerifiedAuctionPix({ paymentId: payment._id, providerOrder })));
+    const successful = results.filter(result => result.status === "fulfilled" && result.value.processed);
+    assert.equal(successful.length, 1, JSON.stringify(results.map(result =>
+      result.status === "fulfilled" ? result.value : String(result.reason))));
+    assert.equal((await AuctionWinnerPayment.findById(payment._id)).status, "paid");
+    assert.equal((await AuctionFulfillment.findById(fulfillment._id)).paymentStatus, "paid");
+    const attempts = await AuctionWinnerPixAttempt.find({ payment: payment._id }).lean();
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].state, "provider_confirmed");
+    assert.equal(attempts[0].providerOrderId, providerOrder.orderId);
+    assert.equal(await AuctionWinnerPayment.countDocuments({ auction: payment.auction }), 1);
+  });
+});
+integration("failed attempt finalization rolls back payment and fulfillment together", async () => {
+  await isolated("rollback", async () => {
+    const { payment, fulfillment, providerOrder } = await fixture();
+    const originalUpdate = AuctionWinnerPixAttempt.updateOne;
+    try {
+      AuctionWinnerPixAttempt.updateOne = async () => {
+        throw new Error("Simulated durable attempt write failure");
+      };
+      await assert.rejects(
+        processVerifiedAuctionPix({ paymentId: payment._id, providerOrder }),
+        /Simulated durable attempt write failure/
+      );
+    } finally {
+      AuctionWinnerPixAttempt.updateOne = originalUpdate;
+    }
+    const storedPayment = await AuctionWinnerPayment.findById(payment._id).lean();
+    const storedFulfillment = await AuctionFulfillment.findById(fulfillment._id).lean();
+    const storedAttempt = await AuctionWinnerPixAttempt.findOne({ payment: payment._id }).lean();
+    assert.equal(storedPayment.status, "pending");
+    assert.equal(storedPayment.processedAt, null);
+    assert.equal(storedPayment.providerPaymentId, null);
+    assert.equal(storedFulfillment.paymentStatus, "pending");
+    assert.equal(storedAttempt.state, "reserved");
+    assert.equal(storedAttempt.providerOrderId, null);
+  });
+});
