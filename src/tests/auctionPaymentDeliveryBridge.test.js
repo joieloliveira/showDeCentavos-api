@@ -111,3 +111,47 @@ integration("mismatched PIX identity cannot unlock delivery or create audit even
     assert.equal(await AuctionDeliveryAuditEvent.countDocuments({ auction }), 0);
   });
 });
+
+integration("parallel verified PIX notifications unlock only one payment and one delivery transition", async () => {
+  await isolated("parallel", async ({ auction, fulfillment, payment, providerOrder, advance }) => {
+    const notifications = await Promise.allSettled(Array.from({ length: 6 }, () =>
+      processVerifiedAuctionPix({ paymentId: payment._id, providerOrder })
+    ));
+    const confirmed = notifications.filter(result =>
+      result.status === "fulfilled" && result.value.processed === true);
+    assert.equal(confirmed.length, 1, JSON.stringify(notifications.map(result =>
+      result.status === "fulfilled" ? result.value : String(result.reason))));
+    assert.equal((await AuctionWinnerPayment.findById(payment._id)).status, "paid");
+    assert.equal((await AuctionFulfillment.findById(fulfillment._id)).paymentStatus, "paid");
+    assert.equal((await AuctionWinnerPixAttempt.findOne({ payment: payment._id })).state, "provider_confirmed");
+    const transitions = await Promise.all([advance("preparing"), advance("preparing")]);
+    assert.deepEqual(transitions.sort(), [200, 409]);
+    assert.equal(await AuctionDeliveryAuditEvent.countDocuments({ auction }), 1);
+    assert.equal((await AuctionFulfillment.findById(fulfillment._id)).deliveryStatus, "preparing");
+  });
+});
+
+integration("failed PIX attempt write rolls back payment and keeps delivery blocked", async () => {
+  await isolated("rollback", async ({ auction, fulfillment, payment, providerOrder, advance }) => {
+    const originalUpdate = AuctionWinnerPixAttempt.updateOne;
+    try {
+      AuctionWinnerPixAttempt.updateOne = async () => {
+        throw new Error("Simulated PIX attempt persistence failure");
+      };
+      await assert.rejects(
+        processVerifiedAuctionPix({ paymentId: payment._id, providerOrder }),
+        /Simulated PIX attempt persistence failure/
+      );
+    } finally {
+      AuctionWinnerPixAttempt.updateOne = originalUpdate;
+    }
+    const storedPayment = await AuctionWinnerPayment.findById(payment._id).lean();
+    assert.equal(storedPayment.status, "pending");
+    assert.equal(storedPayment.processedAt, null);
+    assert.equal(storedPayment.providerPaymentId, null);
+    assert.equal((await AuctionFulfillment.findById(fulfillment._id)).paymentStatus, "pending");
+    assert.equal((await AuctionWinnerPixAttempt.findOne({ payment: payment._id })).state, "reserved");
+    assert.equal(await advance("preparing"), 409);
+    assert.equal(await AuctionDeliveryAuditEvent.countDocuments({ auction }), 0);
+  });
+});
