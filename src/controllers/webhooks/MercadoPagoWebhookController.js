@@ -265,7 +265,7 @@ export const mercadoPagoOrderWebhook = async (
           $setOnInsert: { status: "pending", firstSeenAt: new Date() },
           $inc: { occurrences: 1 },
         },
-        { upsert: true, new: true }
+        { upsert: true, returnDocument: "after" }
       );
       console.error("RECONCILIATION_REQUIRED: approved provider charge on closed order", {
         internalOrderId: String(currentOrder._id),
