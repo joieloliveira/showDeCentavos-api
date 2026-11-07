@@ -86,6 +86,46 @@ integration("HTTP persists only allowlisted address fields and preserves financi
   assert.equal(record.shippingAddress.paymentStatus, undefined);
   assert.equal(await AuctionFulfillment.countDocuments({ auction: finishedId }), 1);
 });
+integration("HTTP normalizes formatted address and ignores forged delivery or payment fields", async () => {
+  const payload = {
+    ...address,
+    phone: "(91) 99999-9999",
+    zipCode: "66000-000",
+    state: "pa",
+    paymentStatus: "paid",
+    deliveryStatus: "delivered",
+    winningPriceCents: 1,
+    winner: String(stranger),
+    country: "XX"
+  };
+  const result = await put(finishedId, token(winner), payload);
+  assert.equal(result.status, 200);
+  const record = await AuctionFulfillment.findOne({ auction: finishedId }).lean();
+  assert.equal(record.shippingAddress.phone, "91999999999");
+  assert.equal(record.shippingAddress.zipCode, "66000000");
+  assert.equal(record.shippingAddress.state, "PA");
+  assert.equal(record.shippingAddress.country, "BR");
+  assert.equal(String(record.winner), String(winner));
+  assert.equal(record.winningPriceCents, 123);
+  assert.equal(record.paymentStatus, "not_started");
+  assert.equal(record.deliveryStatus, "not_started");
+});
+
+integration("HTTP rejects invalid recipient, phone and UF without overwriting saved address", async () => {
+  const before = await AuctionFulfillment.findOne({ auction: finishedId }).lean();
+  for (const patch of [
+    { recipientName: "   " },
+    { phone: "123" },
+    { state: "PARA" },
+    { complement: "x".repeat(121) }
+  ]) {
+    const response = await put(finishedId, token(winner), { ...address, ...patch });
+    assert.equal(response.status, 400);
+  }
+  const after = await AuctionFulfillment.findOne({ auction: finishedId }).lean();
+  assert.deepEqual(after.shippingAddress, before.shippingAddress);
+});
+
 integration("HTTP blocks edits once delivery has started", async () => {
   await AuctionFulfillment.updateOne({ auction: finishedId }, { $set: { deliveryStatus: "preparing" } });
   assert.equal((await put(finishedId, token(winner))).status, 409);
