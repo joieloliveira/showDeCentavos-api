@@ -13,6 +13,7 @@ import {
 
 import MercadoPagoProvider from "../../services/payments/MercadoPagoProvider.js";
 import { validateWebhookProviderOrder } from "../../services/payments/validateWebhookProviderOrder.js";
+import { validateApprovedOrderAmount } from "../../services/payments/validateApprovedOrderAmount.js";
 import { shouldIgnoreOrderWebhookState, canCancelReservedOrder } from "../../services/payments/orderWebhookStateGuard.js";
 
 import { processApprovedOrder } from "../../services/OrderPaymentService.js";
@@ -266,6 +267,17 @@ export const mercadoPagoOrderWebhook = async (
       );
 
       return res.sendStatus(200);
+    }
+
+    // Never fulfill an approved order if the provider amount is absent,
+    // inconsistent with the payment, or different from our order total.
+    if (providerOrder.normalizedStatus === "approved" &&
+        !validateApprovedOrderAmount(currentOrder, providerOrder)) {
+      console.error("RECONCILIATION_REQUIRED: provider amount mismatch or missing amount", {
+        internalOrderId: String(currentOrder._id),
+        providerOrderId: String(providerOrder.orderId),
+      });
+      return res.sendStatus(500);
     }
 
     // A paid provider charge must never be silently acknowledged after
