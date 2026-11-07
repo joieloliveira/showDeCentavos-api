@@ -27,11 +27,12 @@ export async function processVerifiedAuctionPix({ paymentId, providerOrder, reco
       // Never let the ordinary webhook bypass a durable ambiguous attempt.
       // Such an attempt must go through independently verified reconciliation.
       if (!reconcileAttempt) {
-        const ambiguous = await AuctionWinnerPixAttempt.exists({
+        const attempt = await AuctionWinnerPixAttempt.findOne({
           payment: payment._id, auction: payment.auction,
-          state: { $in: ["request_unknown", "reconciliation_required"] },
         }).session(session);
-        if (ambiguous) {
+        if (attempt && (attempt.state !== "reserved" ||
+            (attempt.providerOrderId &&
+             String(attempt.providerOrderId) !== String(providerOrder.orderId)))) {
           outcome = { processed: false, reason: "RECONCILIATION_REQUIRED" };
           return;
         }
@@ -79,12 +80,18 @@ export async function processVerifiedAuctionPix({ paymentId, providerOrder, reco
       if (!reconcileAttempt) {
         // Older payments without an attempt remain compatible. For new reserved
         // payments, finalize the attempt in the same transaction as the credit.
-        await AuctionWinnerPixAttempt.updateOne({
+        const finalized = await AuctionWinnerPixAttempt.updateOne({
           payment: payment._id, auction: payment.auction, state: "reserved",
           $or: [{ providerOrderId: null }, { providerOrderId: String(providerOrder.orderId) }],
         }, {
           $set: { state: "provider_confirmed", providerOrderId: String(providerOrder.orderId), lastError: null },
         }, { session });
+        if (finalized.matchedCount !== 1) {
+          const exists = await AuctionWinnerPixAttempt.exists({
+            payment: payment._id, auction: payment.auction,
+          }).session(session);
+          if (exists) throw new Error("PIX attempt state changed; rolling back confirmation.");
+        }
       }
       outcome = { processed: true, paymentId: String(payment._id) };
     });
