@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import authRoutes from "../routes/authRoutes.js";
+import auth from "../middlewares/auth.js";
 import User from "../models/User.js";
 
 const uri = process.env.WALLET_TEST_MONGODB_URI || "";
@@ -40,6 +41,7 @@ if (safe) {
     const app = express();
     app.use(express.json());
     app.use("/api/auth", authRoutes);
+    app.get("/api/protected-check", auth, (req, res) => res.json({ id: req.user.id, role: req.user.role }));
     server = app.listen(0, "127.0.0.1");
     await new Promise(resolve => server.once("listening", resolve));
     base = "http://127.0.0.1:" + server.address().port;
@@ -82,4 +84,42 @@ integration("active JWT still reads own profile", async () => {
   const result = await request("/me", "GET", undefined, token);
   assert.equal(result.status, 200);
   assert.equal(result.body.user.id, String(active._id));
+});
+
+integration("deactivated user cannot access unrelated protected endpoints with old JWT", async () => {
+  const token = jwt.sign({ id: String(inactive._id), role: "admin" },
+    process.env.JWT_SECRET, { expiresIn: "7d" });
+  const response = await fetch(base + "/api/protected-check", {
+    headers: { authorization: "Bearer " + token }
+  });
+  assert.equal(response.status, 403);
+});
+integration("JWT role cannot elevate a customer's current database permission", async () => {
+  const forgedRoleToken = jwt.sign({ id: String(active._id), role: "admin" },
+    process.env.JWT_SECRET, { expiresIn: "7d" });
+  const response = await fetch(base + "/api/protected-check", {
+    headers: { authorization: "Bearer " + forgedRoleToken }
+  });
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.role, "customer");
+});
+integration("removing account revokes an existing JWT on all protected routes", async () => {
+  const temp = await User.create({ name: "Temporary Account",
+    email: "temporary-auth@example.test", isActive: true });
+  const token = jwt.sign({ id: String(temp._id), role: "customer" },
+    process.env.JWT_SECRET, { expiresIn: "7d" });
+  await User.deleteOne({ _id: temp._id });
+  const response = await fetch(base + "/api/protected-check", {
+    headers: { authorization: "Bearer " + token }
+  });
+  assert.equal(response.status, 403);
+});
+integration("malformed identity token is rejected before database lookup", async () => {
+  const token = jwt.sign({ id: "not-an-object-id", role: "admin" },
+    process.env.JWT_SECRET, { expiresIn: "7d" });
+  const response = await fetch(base + "/api/protected-check", {
+    headers: { authorization: "Bearer " + token }
+  });
+  assert.equal(response.status, 401);
 });
