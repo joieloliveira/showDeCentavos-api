@@ -11,6 +11,7 @@ import {
 } from "mercadopago";
 
 import MercadoPagoProvider from "../../services/payments/MercadoPagoProvider.js";
+import { validateWebhookProviderOrder } from "../../services/payments/validateWebhookProviderOrder.js";
 
 import { processApprovedOrder } from "../../services/OrderPaymentService.js";
 import { processApprovedMercadoPagoWalletDeposit } from "../../services/MercadoPagoWalletDepositService.js";
@@ -149,7 +150,7 @@ export const mercadoPagoOrderWebhook = async (
 
     // A notificação assinada deve corresponder exatamente à Order
     // consultada no provedor. Nunca processe outra cobrança por engano.
-    if (String(providerOrder.orderId || "") !== String(mercadoPagoOrderId)) {
+    if (!validateWebhookProviderOrder(providerOrder, mercadoPagoOrderId)) {
       console.error("Webhook Mercado Pago: divergência no ID da Order consultada.");
       return res.sendStatus(500);
     }
