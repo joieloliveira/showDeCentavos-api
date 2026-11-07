@@ -11,6 +11,7 @@ import User from "../models/User.js";
 import AuctionFulfillment from "../models/AuctionFulfillment.js";
 import AuctionWinnerPayment from "../models/AuctionWinnerPayment.js";
 import AuctionWinnerPixAttempt from "../models/AuctionWinnerPixAttempt.js";
+import AuctionDeliveryAuditEvent from "../models/AuctionDeliveryAuditEvent.js";
 
 const uri = process.env.WALLET_TEST_MONGODB_URI || "";
 const safe = /^mongodb:\/\/127\.0\.0\.1:27018\/wallet_test_pix\?/.test(uri) &&
@@ -71,6 +72,17 @@ try {
         neighborhood: "Bairro Fictício", city: "Belém", state: "PA"
       } } : {})
     });
+    if (index === 2) {
+      // Historical example: delivery is currently preparing, so only its
+      // not_started -> preparing transition belongs in the audit timeline.
+      await AuctionDeliveryAuditEvent.create({
+        auction,
+        actor: admin._id,
+        fromStatus: "not_started",
+        toStatus: "preparing",
+        occurredAt: new Date(Date.now() - 5 * 60 * 1000)
+      });
+    }
     const payment = await AuctionWinnerPayment.create({
       auction, fulfillment: fulfillment._id, winner,
       amountCents: index * 1000 + 250, status,
@@ -98,7 +110,7 @@ try {
   console.log("API local: http://127.0.0.1:3101/api");
   console.log("Login:", email);
   console.log("Senha temporária:", password);
-  console.log("4 pagamentos fictícios persistidos; nenhum provedor de pagamento é chamado.");
+  console.log("4 pagamentos fictícios e 1 evento de auditoria persistidos; nenhum provedor de pagamento é chamado.");
   console.log("Use NEXT_PUBLIC_API_URL=http://127.0.0.1:3101/api no frontend de homologação.");
   console.log("Ao encerrar com Ctrl+C, o banco temporário será descartado.\n");
 } catch (error) {
