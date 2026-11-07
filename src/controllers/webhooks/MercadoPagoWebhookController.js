@@ -327,6 +327,14 @@ export const mercadoPagoOrderWebhook = async (
             return;
           }
 
+          // Recheck inside the transaction: an approval/refund may have
+          // committed after the initial webhook read.
+          if (order.paymentStatus === "paid" ||
+              order.paymentStatus === "refunded" ||
+              order.payment?.processedAt) {
+            return;
+          }
+
           /*
            * Libera reserva de estoque
            * somente se ainda estiver ativa.
