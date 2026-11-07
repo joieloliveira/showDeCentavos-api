@@ -12,6 +12,7 @@ import {
 
 import MercadoPagoProvider from "../../services/payments/MercadoPagoProvider.js";
 import { validateWebhookProviderOrder } from "../../services/payments/validateWebhookProviderOrder.js";
+import { shouldIgnoreOrderWebhookState } from "../../services/payments/orderWebhookStateGuard.js";
 
 import { processApprovedOrder } from "../../services/OrderPaymentService.js";
 import { processApprovedMercadoPagoWalletDeposit } from "../../services/MercadoPagoWalletDepositService.js";
@@ -241,6 +242,12 @@ export const mercadoPagoOrderWebhook = async (
         internalOrderId
       );
 
+      return res.sendStatus(200);
+    }
+
+    // Ignore delayed pending/failed/cancelled notifications after settlement.
+    // A refund remains an explicit state transition handled below.
+    if (shouldIgnoreOrderWebhookState(currentOrder, providerOrder.normalizedStatus)) {
       return res.sendStatus(200);
     }
 
