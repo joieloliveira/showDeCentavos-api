@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import auth from "../middlewares/auth.js";
+import { createAuthRateLimiter } from "../middlewares/authRateLimiter.js";
 import User from "../models/User.js";
 import bcrypt from "bcryptjs";
 
@@ -14,11 +15,14 @@ import {
 
 const router = Router();
 
+const loginLimit = createAuthRateLimiter({ maxAttempts: 10, windowMs: 15 * 60 * 1000 });
+const recoveryLimit = createAuthRateLimiter({ maxAttempts: 5, windowMs: 15 * 60 * 1000 });
+
 router.post("/register", register);
-router.post("/login", login);
-router.post("/google", googleLogin);
-router.post("/forgot-password", forgotPassword);
-router.post("/reset-password", resetPassword);
+router.post("/login", loginLimit, login);
+router.post("/google", loginLimit, googleLogin);
+router.post("/forgot-password", recoveryLimit, forgotPassword);
+router.post("/reset-password", recoveryLimit, resetPassword);
 
 router.patch("/me/name", auth, async (req, res) => {
   const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
