@@ -258,6 +258,7 @@ export const mercadoPagoOrderWebhook = async (
      */
 
     if (
+      providerOrder.normalizedStatus !== "refunded" &&
       currentOrder.payment?.processedAt &&
       (
         currentOrder.payment
