@@ -390,8 +390,10 @@ export const mercadoPagoOrderWebhook = async (
            * Atualiza estado do pagamento.
            */
 
+          // Use the normalized status that selected this branch.
+          // Raw provider statuses may differ (e.g. expired -> cancelled).
           switch (
-          providerOrder.status
+          providerOrder.normalizedStatus
           ) {
             case "failed":
               order.paymentStatus =
