@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import express from "express";
+import mongoose from "mongoose";
+import Order from "../models/Order.js";
+import Product from "../models/Product.js";
 import { createHmac } from "node:crypto";
 import MercadoPagoProvider from "../services/payments/MercadoPagoProvider.js";
 import { mercadoPagoOrderWebhook } from "../controllers/webhooks/MercadoPagoWebhookController.js";
@@ -59,4 +62,61 @@ test("signed webhook rejects provider order ID mismatch before database writes",
     assert.equal((await send()).status, 500);
     assert.equal(calls(), 1);
   });
+});
+
+const mongoUri = process.env.WALLET_TEST_MONGODB_URI || "";
+const safeMongo = /^mongodb:\/\/127\.0\.0\.1:27018\/wallet_test_pix\?/.test(mongoUri) &&
+  /(?:\?|&)replicaSet=walletTestRS(?:&|$)/.test(mongoUri) &&
+  !/@|authSource=|directConnection=/.test(mongoUri);
+const mongoTest = safeMongo ? test : test.skip;
+
+mongoTest("HTTP cancelled webhook releases stock once even when delivered twice", async () => {
+  await mongoose.connect(mongoUri, {
+    dbName: `webhook_http_cancel_${process.pid}_${Date.now()}`,
+    serverSelectionTimeoutMS: 5000
+  });
+  try {
+    const seller = new mongoose.Types.ObjectId();
+    const product = await Product.create({
+      seller, name: "Produto reservado", slug: `webhook-cancel-${Date.now()}`,
+      description: "Produto para teste isolado", price: 100,
+      stock: 2, reservedStock: 1
+    });
+    const order = await Order.create({
+      buyer: new mongoose.Types.ObjectId(),
+      buyerSnapshot: { name: "Comprador", email: "buyer@example.test" },
+      shippingAddress: {
+        recipientName: "Comprador", phone: "91999999999", zipCode: "66000000",
+        street: "Rua Teste", number: "1", neighborhood: "Centro",
+        city: "Belém", state: "PA"
+      },
+      items: [{
+        product: product._id, seller, name: "Produto reservado",
+        quantity: 1, unitPrice: 100, total: 100,
+        platformFeePercent: 10, platformFeeAmount: 10, sellerAmount: 90
+      }],
+      subtotal: 100, total: 100, platformFeeTotal: 10, sellerTotal: 90,
+      stockReservation: { reserved: true, reservedAt: new Date() },
+      paymentStatus: "pending"
+    });
+    await withWebhook({
+      orderId, externalReference: String(order._id),
+      normalizedStatus: "cancelled", status: "expired",
+      payment: { id: "PAY-CANCEL-TEST" }
+    }, async send => {
+      assert.equal((await send()).status, 200);
+      assert.equal((await send()).status, 200);
+    });
+    const updatedOrder = await Order.findById(order._id);
+    const updatedProduct = await Product.findById(product._id);
+    assert.equal(updatedOrder.paymentStatus, "cancelled");
+    assert.equal(updatedOrder.stockReservation.reserved, false);
+    assert.ok(updatedOrder.stockReservation.releasedAt);
+    assert.equal(updatedProduct.stock, 2);
+    assert.equal(updatedProduct.reservedStock, 0);
+    assert.equal(updatedProduct.sales, 0);
+  } finally {
+    if (mongoose.connection.readyState === 1) await mongoose.connection.dropDatabase();
+    await mongoose.disconnect();
+  }
 });
