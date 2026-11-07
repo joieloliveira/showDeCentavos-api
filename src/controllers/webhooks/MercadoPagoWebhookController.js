@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
 import Order from "../../models/Order.js";
+import FinancialReconciliationIncident from "../../models/FinancialReconciliationIncident.js";
 import Product from "../../models/Product.js";
 import WalletDeposit from "../../models/WalletDeposit.js";
 import { routeAuctionPixWebhook } from "../../services/AuctionPixWebhookRouter.js";
@@ -252,6 +253,20 @@ export const mercadoPagoOrderWebhook = async (
       providerOrder.normalizedStatus === "approved" &&
       ["cancelled", "failed"].includes(currentOrder.paymentStatus)
     ) {
+      await FinancialReconciliationIncident.findOneAndUpdate(
+        {
+          order: currentOrder._id,
+          provider: "mercadopago",
+          providerOrderId: String(providerOrder.orderId),
+          reason: "late_approval_after_closure",
+        },
+        {
+          $set: { lastSeenAt: new Date() },
+          $setOnInsert: { status: "pending", firstSeenAt: new Date() },
+          $inc: { occurrences: 1 },
+        },
+        { upsert: true, new: true }
+      );
       console.error("RECONCILIATION_REQUIRED: approved provider charge on closed order", {
         internalOrderId: String(currentOrder._id),
         providerOrderId: String(providerOrder.orderId),
