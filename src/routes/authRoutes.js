@@ -66,11 +66,8 @@ router.get(
           req.user.id
         );
 
-      if (!user) {
-        return res.status(404).json({
-          message:
-            "Usuário não encontrado.",
-        });
+      if (!user || !user.isActive) {
+        return res.status(403).json({ message: "Conta indisponível." });
       }
 
       return res.status(200).json({
