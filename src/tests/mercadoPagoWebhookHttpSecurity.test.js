@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import mongoose from "mongoose";
 import Order from "../models/Order.js";
+import FinancialReconciliationIncident from "../models/FinancialReconciliationIncident.js";
 import Product from "../models/Product.js";
 import { createHmac } from "node:crypto";
 import MercadoPagoProvider from "../services/payments/MercadoPagoProvider.js";
@@ -212,7 +213,13 @@ mongoTest("late approved charge on cancelled order returns retryable error witho
       payment: { id: "PAY-LATE-APPROVAL" }
     }, async send => {
       assert.equal((await send()).status, 500);
+      assert.equal((await send()).status, 500);
     });
+    const incidents = await FinancialReconciliationIncident.find({ order: order._id });
+    assert.equal(incidents.length, 1);
+    assert.equal(incidents[0].status, "pending");
+    assert.equal(incidents[0].occurrences, 2);
+    assert.equal(incidents[0].providerOrderId, orderId);
     const updatedOrder = await Order.findById(order._id);
     const updatedProduct = await Product.findById(product._id);
     assert.equal(updatedOrder.paymentStatus, "cancelled");
