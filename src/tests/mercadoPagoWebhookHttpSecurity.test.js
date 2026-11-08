@@ -245,7 +245,7 @@ mongoTest("late approved charge on cancelled order returns retryable error witho
   }
 });
 
-mongoTest("approved amount mismatch is persisted once across webhook retries", async () => {
+mongoTest("approved amount mismatch reopens resolved incident on another webhook", async () => {
   await mongoose.connect(mongoUri, {
     dbName: `webhook_amount_mismatch_${process.pid}_${Date.now()}`,
     serverSelectionTimeoutMS: 5000
@@ -282,12 +282,17 @@ mongoTest("approved amount mismatch is persisted once across webhook retries", a
     }, async send => {
       assert.equal((await send()).status, 500);
       assert.equal((await send()).status, 500);
+      const original = await FinancialReconciliationIncident.findOne({ order: order._id });
+      assert.equal(original.occurrences, 2);
+      await FinancialReconciliationIncident.updateOne({ _id: original._id }, { $set: { status: "resolved" } });
+      assert.equal((await send()).status, 500);
     });
     const incidents = await FinancialReconciliationIncident.find({ order: order._id });
     assert.equal(incidents.length, 1);
     assert.equal(incidents[0].status, "pending");
+    assert.ok(incidents[0].reopenedAt);
     assert.equal(incidents[0].reason, "approved_amount_mismatch");
-    assert.equal(incidents[0].occurrences, 2);
+    assert.equal(incidents[0].occurrences, 3);
     assert.equal(incidents[0].providerOrderId, orderId);
     const updatedOrder = await Order.findById(order._id);
     const updatedProduct = await Product.findById(product._id);
