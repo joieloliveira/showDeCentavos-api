@@ -1,13 +1,23 @@
 import axios from "axios";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
 
-// Homologação é opt-in: bloqueia chamadas externas se a credencial não for de teste.
+// Em sandbox, uma impressão digital previamente fixada impede uso acidental
+// de outro token. O prefixo APP_USR é válido também para credenciais de teste.
 const mercadoPagoAccessToken = () => {
   const token = process.env.MERCADOPAGO_ACCESS_TOKEN || "";
-  if (process.env.MERCADOPAGO_SANDBOX_MODE === "true" && !token.startsWith("TEST-")) {
-    throw new Error("Homologação Mercado Pago bloqueada: configure um Access Token TEST-.");
-  }
   if (!token) throw new Error("MERCADOPAGO_ACCESS_TOKEN não configurado.");
+  if (process.env.MERCADOPAGO_SANDBOX_MODE === "true") {
+    const expected = process.env.MERCADOPAGO_SANDBOX_TOKEN_SHA256 || "";
+    if (!/^[a-f0-9]{64}$/i.test(expected)) {
+      throw new Error("Homologação bloqueada: configure MERCADOPAGO_SANDBOX_TOKEN_SHA256.");
+    }
+    const actual = createHash("sha256").update(token).digest();
+    const pinned = Buffer.from(expected, "hex");
+    if (!timingSafeEqual(actual, pinned)) {
+      throw new Error("Homologação bloqueada: credencial diferente da credencial de teste fixada.");
+    }
+  }
   return token;
 };
 
