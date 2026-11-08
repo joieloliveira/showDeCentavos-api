@@ -23,44 +23,42 @@ import { processApprovedMercadoPagoWalletDeposit } from "../../services/MercadoP
 const paymentProvider = MercadoPagoProvider;
 
 const recordFinancialIncident = async (order, providerOrder, reason) => {
-  await FinancialReconciliationIncident.findOneAndUpdate(
-    {
-      order: order._id,
-      provider: "mercadopago",
-      providerOrderId: String(providerOrder.orderId),
-      reason,
-    },
-    {
-      $set: { lastSeenAt: new Date() },
-      $setOnInsert: { status: "pending", firstSeenAt: new Date() },
-      $inc: { occurrences: 1 },
-    },
-    { upsert: true, returnDocument: "after" }
-  );
-  // Commit the automatic status transition and its audit entry together.
   const session = await mongoose.startSession();
   try {
     await session.withTransaction(async () => {
-      const reopened = await FinancialReconciliationIncident.findOneAndUpdate(
+      const key = {
+        order: order._id,
+        provider: "mercadopago",
+        providerOrderId: String(providerOrder.orderId),
+        reason,
+      };
+      const now = new Date();
+      // The occurrence, status transition and audit are one atomic unit.
+      const incident = await FinancialReconciliationIncident.findOneAndUpdate(
+        key,
         {
-          order: order._id,
-          provider: "mercadopago",
-          providerOrderId: String(providerOrder.orderId),
-          reason,
-          status: "resolved",
+          $set: { lastSeenAt: now },
+          $setOnInsert: { status: "pending", firstSeenAt: now },
+          $inc: { occurrences: 1 },
         },
-        { $set: { status: "pending", reopenedAt: new Date() } },
-        { session, returnDocument: "after" }
+        { upsert: true, returnDocument: "after", session }
       );
-      if (reopened) {
-        await FinancialIncidentAudit.create([{
-          incident: reopened._id,
-          actor: null,
-          source: "system",
-          fromStatus: "resolved",
-          toStatus: "pending",
-          note: "Reabertura automática: nova notificação do Mercado Pago confirmou a divergência.",
-        }], { session });
+      if (incident.status === "resolved") {
+        const reopened = await FinancialReconciliationIncident.findOneAndUpdate(
+          { _id: incident._id, status: "resolved" },
+          { $set: { status: "pending", reopenedAt: now } },
+          { returnDocument: "after", session }
+        );
+        if (reopened) {
+          await FinancialIncidentAudit.create([{
+            incident: reopened._id,
+            actor: null,
+            source: "system",
+            fromStatus: "resolved",
+            toStatus: "pending",
+            note: "Reabertura automática: nova notificação do Mercado Pago confirmou a divergência.",
+          }], { session });
+        }
       }
     });
   } finally {
