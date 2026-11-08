@@ -78,6 +78,9 @@ export async function updateAdminFinancialIncident(req, res) {
     return res.json({ incident: updated });
   } catch (error) {
     if (error.httpStatus) return res.status(error.httpStatus).json({ message: error.message });
+    if (error.hasErrorLabel?.("TransientTransactionError") || error.code === 112) {
+      return res.status(409).json({ message: "Incidente alterado simultaneamente. Atualize os dados e tente novamente." });
+    }
     console.error("Erro ao atualizar incidente financeiro:", error);
     return res.status(500).json({ message: "Falha ao atualizar incidente financeiro." });
   } finally {
