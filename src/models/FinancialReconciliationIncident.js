@@ -8,6 +8,7 @@ const financialReconciliationIncidentSchema = new mongoose.Schema({
   status: { type: String, enum: ["pending", "investigating", "resolved"], default: "pending", index: true },
   firstSeenAt: { type: Date, default: Date.now },
   lastSeenAt: { type: Date, default: Date.now },
+  reopenedAt: { type: Date, default: null },
   occurrences: { type: Number, default: 1, min: 1 },
 }, { timestamps: true });
 financialReconciliationIncidentSchema.index(
