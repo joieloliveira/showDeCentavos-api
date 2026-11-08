@@ -124,6 +124,61 @@ mongoTest("HTTP cancelled webhook releases stock once even when delivered twice"
   }
 });
 
+mongoTest("sandbox-style approved order webhook commits stock exactly once", async () => {
+  await mongoose.connect(mongoUri, {
+    dbName: `webhook_sandbox_happy_${process.pid}_${Date.now()}`,
+    serverSelectionTimeoutMS: 5000
+  });
+  try {
+    const seller = new mongoose.Types.ObjectId();
+    const product = await Product.create({
+      seller, name: "Produto sandbox", slug: `sandbox-order-${Date.now()}`,
+      description: "Homologação isolada de pagamento", price: 100,
+      stock: 3, reservedStock: 1, sales: 0
+    });
+    const order = await Order.create({
+      buyer: new mongoose.Types.ObjectId(),
+      buyerSnapshot: { name: "Comprador teste", email: "sandbox@example.test" },
+      shippingAddress: {
+        recipientName: "Comprador teste", phone: "91999999999", zipCode: "66000000",
+        street: "Rua Teste", number: "1", neighborhood: "Centro",
+        city: "Belém", state: "PA"
+      },
+      items: [{
+        product: product._id, seller, name: "Produto sandbox",
+        quantity: 1, unitPrice: 100, total: 100,
+        platformFeePercent: 10, platformFeeAmount: 10, sellerAmount: 90
+      }],
+      subtotal: 100, total: 100, platformFeeTotal: 10, sellerTotal: 90,
+      stockReservation: { reserved: true, reservedAt: new Date() },
+      paymentStatus: "pending", payment: { providerOrderId: orderId }
+    });
+    await withWebhook({
+      orderId, externalReference: String(order._id),
+      normalizedStatus: "approved", status: "processed",
+      payment: { id: "PAY-SANDBOX-APPROVED" },
+      raw: { total_amount: "100.00", currency_id: "BRL",
+        transactions: { payments: [{ amount: "100.00" }] } }
+    }, async send => {
+      assert.equal((await send()).status, 200);
+      assert.equal((await send()).status, 200);
+    });
+    const paid = await Order.findById(order._id);
+    const inventory = await Product.findById(product._id);
+    assert.equal(paid.paymentStatus, "paid");
+    assert.equal(paid.payment.providerOrderId, orderId);
+    assert.ok(paid.payment.processedAt);
+    assert.equal(paid.stockReservation.reserved, false);
+    assert.equal(inventory.stock, 2);
+    assert.equal(inventory.reservedStock, 0);
+    assert.equal(inventory.sales, 1);
+    assert.equal(await FinancialReconciliationIncident.countDocuments({ order: order._id }), 0);
+  } finally {
+    if (mongoose.connection.readyState === 1) await mongoose.connection.dropDatabase();
+    await mongoose.disconnect();
+  }
+});
+
 mongoTest("parallel HTTP approval and cancellation preserve a single inventory outcome", async () => {
   await mongoose.connect(mongoUri, {
     dbName: `webhook_http_race_${process.pid}_${Date.now()}`,
