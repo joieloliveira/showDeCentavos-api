@@ -23,7 +23,7 @@ if (!create) {
     impressaoDigitalConfigurada: true,
     criacaoAutorizadaNoAmbiente: allowCreate,
     chamadaExterna: false,
-    valorPrevistoBRL: "1.00"
+    valorPrevistoBRL: "50.00"
   });
   console.log("Nenhuma cobrança foi criada. Use --create apenas após autorização.");
 } else {
@@ -31,7 +31,7 @@ if (!create) {
     throw new Error("Criação bloqueada. MERCADOPAGO_SANDBOX_ALLOW_CREATE deve ser true.");
   }
   // Referência sintética válida; não aponta para qualquer pedido local.
-  const order = { _id: { toString: () => randomUUID() }, total: 1 };
+  const order = { _id: { toString: () => randomUUID() }, total: 50 };
   const result = await createPixOrder({
     order,
     payer: {},
