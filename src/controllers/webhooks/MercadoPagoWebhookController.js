@@ -36,6 +36,18 @@ const recordFinancialIncident = async (order, providerOrder, reason) => {
     },
     { upsert: true, returnDocument: "after" }
   );
+  // Reopen a previously resolved incident whenever the provider confirms
+  // the discrepancy again. The conditional update is safe under retries.
+  await FinancialReconciliationIncident.updateOne(
+    {
+      order: order._id,
+      provider: "mercadopago",
+      providerOrderId: String(providerOrder.orderId),
+      reason,
+      status: "resolved",
+    },
+    { $set: { status: "pending", reopenedAt: new Date() } }
+  );
   console.error("RECONCILIATION_REQUIRED: provider charge requires review", {
     reason,
     internalOrderId: String(order._id),
