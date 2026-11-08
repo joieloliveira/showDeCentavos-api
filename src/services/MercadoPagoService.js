@@ -21,6 +21,15 @@ const mercadoPagoAccessToken = () => {
   return token;
 };
 
+const assertSandboxCreationAuthorized = (sandboxAuthorized) => {
+  if (process.env.MERCADOPAGO_SANDBOX_MODE !== "true") return;
+  // Nunca permitir que uma rota comum crie pagamentos em homologação.
+  if (process.env.MERCADOPAGO_SANDBOX_ALLOW_CREATE !== "true" || sandboxAuthorized !== true) {
+    throw new Error("Criação de pagamento sandbox bloqueada: autorização explícita necessária.");
+  }
+  mercadoPagoAccessToken();
+};
+
 const mercadoPagoApi = axios.create({
   baseURL: "https://api.mercadopago.com",
   headers: {
@@ -32,7 +41,9 @@ export const createPixOrder = async ({
   order,
   payer,
   idempotencyKey,
+  sandboxAuthorized = false,
 }) => {
+  assertSandboxCreationAuthorized(sandboxAuthorized);
   const body = {
     type: "online",
 
@@ -104,7 +115,9 @@ export const createCardOrder = async ({
   payer,
   card,
   idempotencyKey,
+  sandboxAuthorized = false,
 }) => {
+  assertSandboxCreationAuthorized(sandboxAuthorized);
   const body = {
     type: "online",
 
