@@ -284,6 +284,13 @@ export const mercadoPagoOrderWebhook = async (
       }
     }
 
+    // Sandbox notifications may reference synthetic UUIDs rather than MongoDB
+    // ObjectIds. Never query Order by an invalid ID or treat it as a payment.
+    if (!mongoose.isObjectIdOrHexString(internalOrderId)) {
+      console.log("Webhook ignorado: external_reference não é um ObjectId de pedido:", internalOrderId);
+      return res.sendStatus(200);
+    }
+
     const currentOrder =
       await Order.findById(
         internalOrderId
