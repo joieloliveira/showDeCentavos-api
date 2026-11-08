@@ -5,6 +5,7 @@ import mongoose from "mongoose";
 import Order from "../models/Order.js";
 import FinancialReconciliationIncident from "../models/FinancialReconciliationIncident.js";
 import FinancialIncidentAudit from "../models/FinancialIncidentAudit.js";
+import { updateAdminFinancialIncident } from "../controllers/adminFinancialIncidentController.js";
 import Product from "../models/Product.js";
 import { createHmac } from "node:crypto";
 import MercadoPagoProvider from "../services/payments/MercadoPagoProvider.js";
@@ -300,6 +301,47 @@ mongoTest("approved amount mismatch reopens resolved incident on another webhook
     assert.equal(audit[0].toStatus, "pending");
     assert.equal(incidents[0].reason, "approved_amount_mismatch");
     assert.equal(incidents[0].occurrences, 3);
+    // Race an admin resolution against a fresh provider discrepancy.
+    await FinancialReconciliationIncident.updateOne(
+      { _id: incidents[0]._id }, { $set: { status: "investigating" } }
+    );
+    const adminResponse = {
+      statusCode: 200,
+      status(code) { this.statusCode = code; return this; },
+      set() { return this; },
+      json(body) { this.body = body; return this; }
+    };
+    const adminRequest = {
+      params: { incidentId: String(incidents[0]._id) },
+      body: { status: "resolved", note: "Verificação administrativa concorrente" },
+      user: { id: String(new mongoose.Types.ObjectId()) }
+    };
+    await withWebhook({
+      orderId, externalReference: String(order._id),
+      normalizedStatus: "approved", status: "approved",
+      payment: { id: "PAY-LATE-APPROVAL" },
+      raw: { total_amount: "99.00", currency_id: "BRL", transactions: { payments: [{ amount: "99.00" }] } }
+    }, async send => {
+      const [adminResult, webhookResult] = await Promise.allSettled([
+        updateAdminFinancialIncident(adminRequest, adminResponse),
+        send()
+      ]);
+      assert.equal(adminResult.status, "fulfilled");
+      assert.equal(webhookResult.status, "fulfilled");
+      assert.equal(webhookResult.value.status, 500);
+    });
+    assert.ok([200, 409].includes(adminResponse.statusCode));
+    const current = await FinancialReconciliationIncident.findById(incidents[0]._id);
+    const history = await FinancialIncidentAudit.find({ incident: current._id }).sort({ createdAt: 1 });
+    const systemReopens = history.filter(entry => entry.source === "system");
+    assert.ok(systemReopens.length >= 1);
+    assert.ok(systemReopens.length <= 2);
+    assert.equal(history.filter(entry => entry.source === "admin").length,
+      adminResponse.statusCode === 200 ? 1 : 0);
+    if (adminResponse.statusCode === 200) {
+      assert.equal(history.find(entry => entry.source === "admin").toStatus, "resolved");
+    }
+    assert.ok(["investigating", "resolved", "pending"].includes(current.status));
     assert.equal(incidents[0].providerOrderId, orderId);
     const updatedOrder = await Order.findById(order._id);
     const updatedProduct = await Product.findById(product._id);
