@@ -56,7 +56,9 @@ export const createPixOrder = async ({
       order.total.toFixed(2),
 
     payer: {
-      email: "test_user_br@testuser.com",
+      email: process.env.MERCADOPAGO_SANDBOX_MODE === "true"
+        ? "test_payer@example.com"
+        : "test_user_br@testuser.com",
       first_name: "APRO",
     },
 
