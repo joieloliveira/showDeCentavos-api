@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 import Order from "../../models/Order.js";
 import FinancialReconciliationIncident from "../../models/FinancialReconciliationIncident.js";
+import FinancialIncidentAudit from "../../models/FinancialIncidentAudit.js";
 import Product from "../../models/Product.js";
 import WalletDeposit from "../../models/WalletDeposit.js";
 import { routeAuctionPixWebhook } from "../../services/AuctionPixWebhookRouter.js";
@@ -36,18 +37,35 @@ const recordFinancialIncident = async (order, providerOrder, reason) => {
     },
     { upsert: true, returnDocument: "after" }
   );
-  // Reopen a previously resolved incident whenever the provider confirms
-  // the discrepancy again. The conditional update is safe under retries.
-  await FinancialReconciliationIncident.updateOne(
-    {
-      order: order._id,
-      provider: "mercadopago",
-      providerOrderId: String(providerOrder.orderId),
-      reason,
-      status: "resolved",
-    },
-    { $set: { status: "pending", reopenedAt: new Date() } }
-  );
+  // Commit the automatic status transition and its audit entry together.
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const reopened = await FinancialReconciliationIncident.findOneAndUpdate(
+        {
+          order: order._id,
+          provider: "mercadopago",
+          providerOrderId: String(providerOrder.orderId),
+          reason,
+          status: "resolved",
+        },
+        { $set: { status: "pending", reopenedAt: new Date() } },
+        { session, returnDocument: "after" }
+      );
+      if (reopened) {
+        await FinancialIncidentAudit.create([{
+          incident: reopened._id,
+          actor: null,
+          source: "system",
+          fromStatus: "resolved",
+          toStatus: "pending",
+          note: "Reabertura automática: nova notificação do Mercado Pago confirmou a divergência.",
+        }], { session });
+      }
+    });
+  } finally {
+    await session.endSession();
+  }
   console.error("RECONCILIATION_REQUIRED: provider charge requires review", {
     reason,
     internalOrderId: String(order._id),
