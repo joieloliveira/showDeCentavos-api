@@ -93,7 +93,7 @@ export async function listAdminFinancialIncidentAudit(req, res) {
     const incident = await FinancialReconciliationIncident.exists({ _id: req.params.incidentId });
     if (!incident) return res.status(404).json({ message: "Incidente não encontrado." });
     const history = await FinancialIncidentAudit.find({ incident: req.params.incidentId })
-      .select("actor fromStatus toStatus note createdAt")
+      .select("actor source fromStatus toStatus note createdAt")
       .sort({ createdAt: -1, _id: -1 }).limit(100).lean();
     res.set("Cache-Control", "no-store");
     return res.json({ items: history });
