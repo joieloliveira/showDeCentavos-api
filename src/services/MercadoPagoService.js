@@ -1,6 +1,16 @@
 import axios from "axios";
 import { v4 as uuidv4 } from "uuid";
 
+// Homologação é opt-in: bloqueia chamadas externas se a credencial não for de teste.
+const mercadoPagoAccessToken = () => {
+  const token = process.env.MERCADOPAGO_ACCESS_TOKEN || "";
+  if (process.env.MERCADOPAGO_SANDBOX_MODE === "true" && !token.startsWith("TEST-")) {
+    throw new Error("Homologação Mercado Pago bloqueada: configure um Access Token TEST-.");
+  }
+  if (!token) throw new Error("MERCADOPAGO_ACCESS_TOKEN não configurado.");
+  return token;
+};
+
 const mercadoPagoApi = axios.create({
   baseURL: "https://api.mercadopago.com",
   headers: {
@@ -54,7 +64,7 @@ export const createPixOrder = async ({
         {
           headers: {
             Authorization:
-              `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+              `Bearer ${mercadoPagoAccessToken()}`,
 
             "X-Idempotency-Key":
               idempotencyKey,
@@ -135,7 +145,7 @@ export const createCardOrder = async ({
         {
           headers: {
             Authorization:
-              `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+              `Bearer ${mercadoPagoAccessToken()}`,
 
             "X-Idempotency-Key":
               idempotencyKey,
@@ -172,7 +182,7 @@ export const getMercadoPagoOrder = async (
     {
       headers: {
         Authorization:
-          `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+          `Bearer ${mercadoPagoAccessToken()}`,
       },
     }
   );
@@ -190,7 +200,7 @@ export const searchMercadoPagoOrders = async ({
     {
       headers: {
         Authorization:
-          `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+          `Bearer ${mercadoPagoAccessToken()}`,
       },
       params: {
         external_reference: externalReference,
