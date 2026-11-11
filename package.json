@@ -1,7 +1,7 @@
 {
-  "name": "marketplace-miniaturas-3d",
+  "name": "show-de-centavos-api",
   "version": "1.0.0",
-  "description": "API do marketplace de miniaturas 3D",
+  "description": "API da plataforma Show de Centavos",
   "main": "src/server.js",
   "type": "module",
   "scripts": {
