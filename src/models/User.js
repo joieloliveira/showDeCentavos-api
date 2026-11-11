@@ -10,6 +10,8 @@ const userSchema = new mongoose.Schema(
       maxlength: 100,
     },
 
+    publicNickname: { type: String, trim: true, minlength: 3, maxlength: 30, match: /^[A-Za-z0-9_]+$/, default: null },
+
     email: {
       type: String,
       required: true,
@@ -165,6 +167,8 @@ const userSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+userSchema.index({ publicNickname: 1 }, { unique: true, partialFilterExpression: { publicNickname: { $type: 'string' } }, collation: { locale: 'en', strength: 2 } });
 
 userSchema.index(
   { googleId: 1 },

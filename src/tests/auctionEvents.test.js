@@ -1,0 +1,119 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { publishAuctionEvent, subscribeAuctionEvents } from '../services/AuctionEventsService.js';
+
+function client() {
+  const req = new EventEmitter();
+  const res = Object.assign(new EventEmitter(), {
+    frames: [], headers: {}, destroyed: false, writableEnded: false,
+    statusCode: 200,
+    setHeader(key, value) { this.headers[key] = value; },
+    flushHeaders() {},
+    write(value) { this.frames.push(value); return true; },
+    status(code) { this.statusCode = code; return this; },
+    json(value) { this.payload = value; return this; },
+    end() { this.writableEnded = true; this.emit('close'); },
+  });
+  return { req, res };
+}
+
+test('SSE broadcasts only to subscribers of the matching auction and cleans up disconnected clients', () => {
+  const a = client();
+  const b = client();
+  const other = client();
+  const auctionId = 'test-' + Math.random().toString(36).slice(2);
+  subscribeAuctionEvents(a.req, a.res, auctionId);
+  subscribeAuctionEvents(b.req, b.res, auctionId);
+  subscribeAuctionEvents(other.req, other.res, auctionId + '-other');
+  assert.equal(a.res.headers['Content-Type'], 'text/event-stream');
+  assert.equal(a.res.headers['X-Accel-Buffering'], 'no');
+  const update = { status: 'active', currentPriceCents: 2, bidCount: 2, endsAt: new Date().toISOString() };
+  publishAuctionEvent(auctionId, update);
+  for (const subscriber of [a, b]) {
+    assert.equal(subscriber.res.frames.length, 2);
+    const frame = subscriber.res.frames[1];
+    assert.ok(frame.startsWith('event: auction-update\n'));
+    assert.deepEqual(JSON.parse(frame.split('data: ')[1].trim()), update);
+  }
+  assert.equal(other.res.frames.length, 1);
+  a.req.emit('close');
+  publishAuctionEvent(auctionId, { status: 'finished' });
+  assert.equal(a.res.frames.length, 2);
+  assert.equal(b.res.frames.length, 3);
+  b.req.emit('close');
+  other.req.emit('close');
+});
+
+test('SSE rejects slow consumers to avoid unlimited response buffering', () => {
+  const { req, res } = client();
+  const auctionId = 'slow-' + Math.random().toString(36).slice(2);
+  subscribeAuctionEvents(req, res, auctionId);
+  res.write = () => false;
+  publishAuctionEvent(auctionId, { status: 'active' });
+  assert.equal(res.writableEnded, true);
+  req.emit('close');
+});
+
+test('SSE reconnects with a fresh subscriber and receives subsequent updates', () => {
+  const auctionId = 'reconnect-' + Math.random().toString(36).slice(2);
+  const first = client();
+  subscribeAuctionEvents(first.req, first.res, auctionId);
+  first.req.emit('close');
+  const second = client();
+  try {
+    subscribeAuctionEvents(second.req, second.res, auctionId);
+    publishAuctionEvent(auctionId, { status: 'active' });
+    assert.equal(first.res.frames.length, 1);
+    assert.equal(second.res.frames.length, 2);
+    assert.match(second.res.frames[1], /^event: auction-update\n/);
+  } finally {
+    second.req.emit('close');
+  }
+});
+
+
+test('SSE disconnects stalled subscribers on heartbeat backpressure', () => {
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  let tick;
+  globalThis.setInterval = callback => {
+    tick = callback;
+    return { unref() {} };
+  };
+  globalThis.clearInterval = () => {};
+  const auctionId = 'heartbeat-' + Math.random().toString(36).slice(2);
+  const { req, res } = client();
+  try {
+    subscribeAuctionEvents(req, res, auctionId);
+    res.write = frame => !frame.startsWith(': heartbeat');
+    tick();
+    assert.equal(res.writableEnded, true);
+    publishAuctionEvent(auctionId, { status: 'active' });
+    assert.equal(res.frames.length, 1);
+  } finally {
+    req.emit('close');
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+
+test('SSE write failure cannot interrupt updates to healthy auction subscribers', () => {
+  const auctionId = 'broken-socket-' + Math.random().toString(36).slice(2);
+  const broken = client();
+  const healthy = client();
+  try {
+    subscribeAuctionEvents(broken.req, broken.res, auctionId);
+    subscribeAuctionEvents(healthy.req, healthy.res, auctionId);
+    broken.res.write = () => { throw new Error('socket disconnected'); };
+    assert.doesNotThrow(() => publishAuctionEvent(auctionId, { status: 'active', bidCount: 1 }));
+    assert.equal(broken.res.writableEnded, true);
+    assert.equal(healthy.res.frames.length, 2);
+    publishAuctionEvent(auctionId, { status: 'finished' });
+    assert.equal(healthy.res.frames.length, 3);
+  } finally {
+    broken.req.emit('close');
+    healthy.req.emit('close');
+  }
+});

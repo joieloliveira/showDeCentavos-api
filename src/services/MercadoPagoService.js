@@ -1,5 +1,34 @@
 import axios from "axios";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { v4 as uuidv4 } from "uuid";
+
+// Em sandbox, uma impressão digital previamente fixada impede uso acidental
+// de outro token. O prefixo APP_USR é válido também para credenciais de teste.
+const mercadoPagoAccessToken = () => {
+  const token = process.env.MERCADOPAGO_ACCESS_TOKEN || "";
+  if (!token) throw new Error("MERCADOPAGO_ACCESS_TOKEN não configurado.");
+  if (process.env.MERCADOPAGO_SANDBOX_MODE === "true") {
+    const expected = process.env.MERCADOPAGO_SANDBOX_TOKEN_SHA256 || "";
+    if (!/^[a-f0-9]{64}$/i.test(expected)) {
+      throw new Error("Homologação bloqueada: configure MERCADOPAGO_SANDBOX_TOKEN_SHA256.");
+    }
+    const actual = createHash("sha256").update(token).digest();
+    const pinned = Buffer.from(expected, "hex");
+    if (!timingSafeEqual(actual, pinned)) {
+      throw new Error("Homologação bloqueada: credencial diferente da credencial de teste fixada.");
+    }
+  }
+  return token;
+};
+
+const assertSandboxCreationAuthorized = (sandboxAuthorized) => {
+  if (process.env.MERCADOPAGO_SANDBOX_MODE !== "true") return;
+  // Nunca permitir que uma rota comum crie pagamentos em homologação.
+  if (process.env.MERCADOPAGO_SANDBOX_ALLOW_CREATE !== "true" || sandboxAuthorized !== true) {
+    throw new Error("Criação de pagamento sandbox bloqueada: autorização explícita necessária.");
+  }
+  mercadoPagoAccessToken();
+};
 
 const mercadoPagoApi = axios.create({
   baseURL: "https://api.mercadopago.com",
@@ -12,7 +41,9 @@ export const createPixOrder = async ({
   order,
   payer,
   idempotencyKey,
+  sandboxAuthorized = false,
 }) => {
+  assertSandboxCreationAuthorized(sandboxAuthorized);
   const body = {
     type: "online",
 
@@ -25,7 +56,9 @@ export const createPixOrder = async ({
       order.total.toFixed(2),
 
     payer: {
-      email: "test_user_br@testuser.com",
+      email: process.env.MERCADOPAGO_SANDBOX_MODE === "true"
+        ? "test_payer@example.com"
+        : "test_user_br@testuser.com",
       first_name: "APRO",
     },
 
@@ -54,7 +87,7 @@ export const createPixOrder = async ({
         {
           headers: {
             Authorization:
-              `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+              `Bearer ${mercadoPagoAccessToken()}`,
 
             "X-Idempotency-Key":
               idempotencyKey,
@@ -84,7 +117,9 @@ export const createCardOrder = async ({
   payer,
   card,
   idempotencyKey,
+  sandboxAuthorized = false,
 }) => {
+  assertSandboxCreationAuthorized(sandboxAuthorized);
   const body = {
     type: "online",
 
@@ -135,7 +170,7 @@ export const createCardOrder = async ({
         {
           headers: {
             Authorization:
-              `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+              `Bearer ${mercadoPagoAccessToken()}`,
 
             "X-Idempotency-Key":
               idempotencyKey,
@@ -172,7 +207,7 @@ export const getMercadoPagoOrder = async (
     {
       headers: {
         Authorization:
-          `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+          `Bearer ${mercadoPagoAccessToken()}`,
       },
     }
   );
@@ -190,7 +225,7 @@ export const searchMercadoPagoOrders = async ({
     {
       headers: {
         Authorization:
-          `Bearer ${process.env.MERCADOPAGO_ACCESS_TOKEN}`,
+          `Bearer ${mercadoPagoAccessToken()}`,
       },
       params: {
         external_reference: externalReference,
