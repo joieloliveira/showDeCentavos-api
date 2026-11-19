@@ -35,6 +35,15 @@ const walletDepositSchema = new mongoose.Schema(
       required: true,
     },
 
+    providerOrderId: { type: String, default: null },
+    idempotencyKey: { type: String, default: null },
+    chargeStatus: { type: String, enum: ["submitted", "resolved"], default: null },
+    pix: {
+      qrCode: { type: String, default: null },
+      qrCodeBase64: { type: String, default: null },
+      ticketUrl: { type: String, default: null },
+    },
+
     providerPaymentId: {
       type: String,
       default: null,
@@ -49,6 +58,15 @@ const walletDepositSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+walletDepositSchema.index({ provider: 1, providerOrderId: 1 }, {
+  unique: true,
+  partialFilterExpression: { providerOrderId: { $type: "string" } },
+});
+walletDepositSchema.index({ provider: 1, idempotencyKey: 1 }, {
+  unique: true,
+  partialFilterExpression: { idempotencyKey: { $type: "string" } },
+});
 
 // Impede reutilizar o mesmo identificador
 // de pagamento do provedor.

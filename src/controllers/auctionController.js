@@ -1,7 +1,17 @@
+import { subscribeAuctionEvents } from "../services/AuctionEventsService.js";
 
 import mongoose from "mongoose";
 import Auction from "../models/Auction.js";
+import { recordAuctionAuditEvent } from "../services/AuctionAuditService.js";
 import Product from "../models/Product.js";
+import User from "../models/User.js";
+
+async function getPublicWinnerNickname(auction) {
+  if (auction?.status !== "finished" || !auction.winner) return null;
+  const user = await User.findById(auction.winner).select("publicNickname").lean();
+  return user?.publicNickname || null;
+}
+
 
 export const createAuction = async (req, res) => {
   try {
@@ -58,6 +68,7 @@ export const createAuction = async (req, res) => {
       status: "scheduled",
     });
 
+    await recordAuctionAuditEvent(auction._id, "created", auction.createdAt, "admin", req.user?._id ?? req.user?.id ?? null);
     return res.status(201).json({
       message: "Leilão cadastrado com sucesso.",
       auction,
@@ -80,10 +91,20 @@ export const listAuctions = async (req, res) => {
         model: Product,
         select: "name slug price images coverImage status",
       })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
+    const winnerIds = [...new Set(auctions.filter(a => a.status === 'finished' && a.winner).map(a => String(a.winner)))];
+    const winnerUsers = winnerIds.length ? await User.find({ _id: { $in: winnerIds } })
+      .select('publicNickname').lean() : [];
+    const nicknames = new Map(winnerUsers.map(u => [String(u._id), u.publicNickname || null]));
+    const publicAuctions = auctions.map(({ winner, lastBidder, ...auction }) => ({
+      ...auction,
+      winnerNickname: auction.status === 'finished' && winner ? (nicknames.get(String(winner)) || null) : null,
+    }));
+    res.set("Cache-Control", "no-store");
     return res.status(200).json({
-      auctions,
+      auctions: publicAuctions,
     });
   } catch (error) {
     console.error("Erro ao listar leilões:", error);
@@ -118,9 +139,11 @@ export const getAuctionById = async (req, res) => {
       });
     }
 
-    return res.status(200).json({
-      auction,
-    });
+    const safeAuction = auction.toObject();
+    delete safeAuction.winner;
+    delete safeAuction.lastBidder;
+    safeAuction.winnerNickname = await getPublicWinnerNickname(auction);
+    return res.status(200).json({ auction: safeAuction });
   } catch (error) {
     console.error("Erro ao buscar leilão:", error);
 
@@ -202,6 +225,7 @@ export const startAuctionWaiting = async (req, res) => {
       });
     }
 
+    await recordAuctionAuditEvent(updatedAuction._id, "waiting_started", now, "admin", req.user?._id ?? req.user?.id ?? null);
     return res.status(200).json({
       message: "Contagem de espera iniciada com sucesso.",
       auction: updatedAuction,
@@ -212,5 +236,68 @@ export const startAuctionWaiting = async (req, res) => {
     return res.status(500).json({
       message: "Erro interno do servidor.",
     });
+  }
+};
+
+// Lightweight public snapshot for frequent countdown/price synchronization.
+// Never exposes wallet balances, user identity, or bid payment records.
+export const getAuctionLiveState = async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({ message: "ID do leilão inválido." });
+    }
+    const auction = await Auction.findById(req.params.id)
+      .select("status currentPriceCents bidCount startsAt endsAt bidCostCents winner")
+      .lean();
+    if (!auction) return res.status(404).json({ message: "Leilão não encontrado." });
+    res.set("Cache-Control", "no-store");
+    const { winner, ...publicAuction } = auction;
+    return res.status(200).json({ auction: { ...publicAuction, winnerNickname: await getPublicWinnerNickname(auction) }, serverTime: new Date().toISOString() });
+  } catch (error) {
+    console.error("Erro ao consultar estado do leilão:", error);
+    return res.status(500).json({ message: "Erro interno do servidor." });
+  }
+};
+
+export const streamAuctionEvents = async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ message: "ID do leilão inválido." });
+  try {
+    if (!(await Auction.exists({ _id: req.params.id }))) return res.status(404).json({ message: "Leilão não encontrado." });
+    return subscribeAuctionEvents(req, res, req.params.id);
+  } catch (error) {
+    console.error("Erro ao conectar eventos do leilão:", error);
+    return res.status(500).json({ message: "Erro interno do servidor." });
+  }
+};
+
+export const listPublicWinners = async (_req, res) => {
+  try {
+    const auctions = await Auction.find({ status: "finished", winner: { $ne: null } })
+      .select("product currentPriceCents endsAt winner")
+      .populate({ path: "product", model: Product, select: "name coverImage" })
+      .sort({ endsAt: -1 })
+      .limit(50)
+      .lean();
+    const winnerIds = [...new Set(auctions.map(a => String(a.winner)))];
+    const users = await User.find({ _id: { $in: winnerIds }, publicNickname: { $type: "string" } })
+      .select("publicNickname").lean();
+    const names = new Map(users.map(u => [String(u._id), u.publicNickname]));
+    const winners = auctions.flatMap(a => {
+      const nickname = names.get(String(a.winner));
+      if (!nickname) return [];
+      return [{
+        auctionId: String(a._id),
+        productName: a.product?.name || "Produto indisponível",
+        coverImageUrl: a.product?.coverImage?.url || null,
+        finalPriceCents: a.currentPriceCents,
+        finishedAt: a.endsAt,
+        winnerNickname: nickname,
+      }];
+    });
+    res.set("Cache-Control", "no-store");
+    return res.json({ winners });
+  } catch (error) {
+    console.error("Erro ao listar vencedores:", error);
+    return res.status(500).json({ message: "Erro interno do servidor." });
   }
 };

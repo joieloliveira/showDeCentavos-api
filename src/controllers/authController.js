@@ -82,6 +82,10 @@ export const login = async (req, res) => {
       });
     }
 
+    if (!user.isActive) {
+      return res.status(403).json({ message: "Esta conta está desativada." });
+    }
+
     if (!user.password) {
       return res.status(401).json({
         message:
@@ -282,11 +286,16 @@ export const googleLogin = async (req, res) => {
       .trim()
       .toLowerCase();
 
+    // googleId is select:false in User; explicitly load it to prevent
+    // replacing an existing Google account binding with a different subject.
     let user = await User.findOne({
       email,
-    });
+    }).select('+googleId');
 
     if (user) {
+      if (!user.isActive) {
+        return res.status(403).json({ message: "Esta conta está desativada." });
+      }
       if (
         user.googleId &&
         user.googleId !== payload.sub

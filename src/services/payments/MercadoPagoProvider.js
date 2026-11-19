@@ -27,6 +27,9 @@ const normalizeStatus = (status) => {
     case "refunded":
       return "refunded";
 
+    case "charged_back":
+      return "charged_back";
+
     default:
       return "pending";
   }

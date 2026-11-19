@@ -3,3 +3,6 @@ node_modules/
 outDir/
 uploads/
 *.log
+# Credenciais locais de homologação
+.env.sandbox
+.env.sandbox.*

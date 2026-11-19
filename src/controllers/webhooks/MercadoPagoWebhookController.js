@@ -1,6 +1,11 @@
 import mongoose from "mongoose";
 
 import Order from "../../models/Order.js";
+import FinancialReconciliationIncident from "../../models/FinancialReconciliationIncident.js";
+import FinancialIncidentAudit from "../../models/FinancialIncidentAudit.js";
+import Product from "../../models/Product.js";
+import WalletDeposit from "../../models/WalletDeposit.js";
+import { routeAuctionPixWebhook } from "../../services/AuctionPixWebhookRouter.js";
 
 import {
   WebhookSignatureValidator,
@@ -8,10 +13,64 @@ import {
 } from "mercadopago";
 
 import MercadoPagoProvider from "../../services/payments/MercadoPagoProvider.js";
+import { validateWebhookProviderOrder } from "../../services/payments/validateWebhookProviderOrder.js";
+import { validateApprovedOrderAmount } from "../../services/payments/validateApprovedOrderAmount.js";
+import { shouldIgnoreOrderWebhookState, canCancelReservedOrder } from "../../services/payments/orderWebhookStateGuard.js";
 
 import { processApprovedOrder } from "../../services/OrderPaymentService.js";
+import { processApprovedMercadoPagoWalletDeposit } from "../../services/MercadoPagoWalletDepositService.js";
 
 const paymentProvider = MercadoPagoProvider;
+
+const recordFinancialIncident = async (order, providerOrder, reason) => {
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const key = {
+        order: order._id,
+        provider: "mercadopago",
+        providerOrderId: String(providerOrder.orderId),
+        reason,
+      };
+      const now = new Date();
+      // The occurrence, status transition and audit are one atomic unit.
+      const incident = await FinancialReconciliationIncident.findOneAndUpdate(
+        key,
+        {
+          $set: { lastSeenAt: now },
+          $setOnInsert: { status: "pending", firstSeenAt: now },
+          $inc: { occurrences: 1 },
+        },
+        { upsert: true, returnDocument: "after", session }
+      );
+      if (incident.status === "resolved") {
+        const reopened = await FinancialReconciliationIncident.findOneAndUpdate(
+          { _id: incident._id, status: "resolved" },
+          { $set: { status: "pending", reopenedAt: now } },
+          { returnDocument: "after", session }
+        );
+        if (reopened) {
+          await FinancialIncidentAudit.create([{
+            incident: reopened._id,
+            actor: null,
+            source: "system",
+            fromStatus: "resolved",
+            toStatus: "pending",
+            note: "Reabertura automática: nova notificação do Mercado Pago confirmou a divergência.",
+          }], { session });
+        }
+      }
+    });
+  } finally {
+    await session.endSession();
+  }
+  console.error("RECONCILIATION_REQUIRED: provider charge requires review", {
+    reason,
+    internalOrderId: String(order._id),
+    providerOrderId: String(providerOrder.orderId),
+    paymentStatus: order.paymentStatus,
+  });
+};
 
 export const mercadoPagoOrderWebhook = async (
   req,
@@ -140,7 +199,14 @@ export const mercadoPagoOrderWebhook = async (
         "Não foi possível consultar a Order no Mercado Pago."
       );
 
-      return res.sendStatus(200);
+      return res.sendStatus(500);
+    }
+
+    // A notificação assinada deve corresponder exatamente à Order
+    // consultada no provedor. Nunca processe outra cobrança por engano.
+    if (!validateWebhookProviderOrder(providerOrder, mercadoPagoOrderId)) {
+      console.error("Webhook Mercado Pago: divergência no ID da Order consultada.");
+      return res.sendStatus(500);
     }
 
     /*
@@ -161,6 +227,70 @@ export const mercadoPagoOrderWebhook = async (
       return res.sendStatus(200);
     }
 
+    // Auction PIX has its own financial domain. Route only after signature
+    // validation and provider lookup; never fall through when matched.
+    const auctionPix = await routeAuctionPixWebhook({
+      externalReference: internalOrderId,
+      providerOrderId: String(providerOrder.orderId),
+    });
+    if (auctionPix.matched) {
+      if (!auctionPix.processed) {
+        console.log("Auction PIX webhook not processed:", auctionPix.reason);
+      }
+      return res.sendStatus(200);
+    }
+
+    // O mesmo webhook configurado no Mercado Pago atende pedidos e recargas.
+    // Uma recarga só é creditada após verificação independente no provedor.
+    if (mongoose.isObjectIdOrHexString(internalOrderId)) {
+      const walletDeposit = await WalletDeposit.findOne({
+        _id: internalOrderId,
+        provider: "mercadopago",
+        $or: [
+          { providerOrderId: String(providerOrder.orderId) },
+          { providerOrderId: null },
+        ],
+      });
+      if (walletDeposit) {
+        // Mesmo que o pagamento ainda esteja pendente, guardamos o ID da
+        // cobrança recebida no webhook. Isso permite reconciliação posterior
+        // quando a resposta original da criação do PIX sofreu timeout.
+        const orderId = String(providerOrder.orderId);
+        const linkedDeposit = await WalletDeposit.findOneAndUpdate(
+          {
+            _id: walletDeposit._id,
+            provider: "mercadopago",
+            $or: [{ providerOrderId: null }, { providerOrderId: orderId }],
+          },
+          {
+            $set: {
+              providerOrderId: orderId,
+              chargeStatus: "resolved",
+            },
+          },
+          { returnDocument: "after" }
+        );
+        if (!linkedDeposit) {
+          console.error("Recarga vinculada a outra cobrança:", walletDeposit._id);
+          return res.sendStatus(500);
+        }
+        if (providerOrder.normalizedStatus === "approved") {
+          await processApprovedMercadoPagoWalletDeposit({
+            depositId: String(walletDeposit._id),
+            providerOrderId: String(providerOrder.orderId),
+          });
+        }
+        return res.sendStatus(200);
+      }
+    }
+
+    // Sandbox notifications may reference synthetic UUIDs rather than MongoDB
+    // ObjectIds. Never query Order by an invalid ID or treat it as a payment.
+    if (!mongoose.isObjectIdOrHexString(internalOrderId)) {
+      console.log("Webhook ignorado: external_reference não é um ObjectId de pedido:", internalOrderId);
+      return res.sendStatus(200);
+    }
+
     const currentOrder =
       await Order.findById(
         internalOrderId
@@ -175,6 +305,50 @@ export const mercadoPagoOrderWebhook = async (
       return res.sendStatus(200);
     }
 
+    // Never fulfill an approved order if the provider amount is absent,
+    // inconsistent with the payment, or different from our order total.
+    if (providerOrder.normalizedStatus === "approved" &&
+        !validateApprovedOrderAmount(currentOrder, providerOrder)) {
+      await recordFinancialIncident(currentOrder, providerOrder, "approved_amount_mismatch");
+      return res.sendStatus(500);
+    }
+
+    // A paid provider charge must never be silently acknowledged after
+    // local cancellation/stock release. Keep the webhook retryable and
+    // surface the mismatch for manual financial reconciliation.
+    if (
+      providerOrder.normalizedStatus === "approved" &&
+      ["cancelled", "failed"].includes(currentOrder.paymentStatus)
+    ) {
+      await recordFinancialIncident(currentOrder, providerOrder, "late_approval_after_closure");
+      return res.sendStatus(500);
+    }
+
+    // Reject a different provider charge from rewriting an already-linked
+    // order. Never use externalReference alone as proof of charge identity.
+    const linkedProviderOrderId =
+      currentOrder.payment?.processedProviderOrderId ||
+      currentOrder.payment?.providerOrderId ||
+      currentOrder.payment?.processedMercadoPagoOrderId ||
+      currentOrder.payment?.mercadoPagoOrderId;
+    if (
+      linkedProviderOrderId &&
+      String(linkedProviderOrderId) !== String(providerOrder.orderId)
+    ) {
+      console.error("Webhook charge identity mismatch", {
+        internalOrderId: String(currentOrder._id),
+        linkedProviderOrderId: String(linkedProviderOrderId),
+        incomingProviderOrderId: String(providerOrder.orderId),
+      });
+      return res.sendStatus(500);
+    }
+
+    // Ignore delayed pending/failed/cancelled notifications after settlement.
+    // A refund remains an explicit state transition handled below.
+    if (shouldIgnoreOrderWebhookState(currentOrder, providerOrder.normalizedStatus)) {
+      return res.sendStatus(200);
+    }
+
     /*
      * =================================================
      * 5. IDEMPOTÊNCIA
@@ -182,6 +356,7 @@ export const mercadoPagoOrderWebhook = async (
      */
 
     if (
+      providerOrder.normalizedStatus !== "refunded" &&
       currentOrder.payment?.processedAt &&
       (
         currentOrder.payment
@@ -211,11 +386,21 @@ export const mercadoPagoOrderWebhook = async (
       providerOrder.normalizedStatus ===
       "approved"
     ) {
-      await processApprovedOrder({
+      const approval = await processApprovedOrder({
         internalOrderId,
         providerOrder,
         notificationId,
       });
+
+      // The order may have been cancelled after the initial read but before
+      // the transactional approval. Never acknowledge a paid charge silently.
+      if (!approval.processed) {
+        const latestOrder = await Order.findById(internalOrderId);
+        if (latestOrder && ["cancelled", "failed"].includes(latestOrder.paymentStatus)) {
+          await recordFinancialIncident(latestOrder, providerOrder, "late_approval_after_closure");
+          return res.sendStatus(500);
+        }
+      }
 
       return res.sendStatus(200);
     }
@@ -247,6 +432,12 @@ export const mercadoPagoOrderWebhook = async (
             ).session(session);
 
           if (!order) {
+            return;
+          }
+
+          // Recheck inside the transaction: an approval/refund may have
+          // committed after the initial webhook read.
+          if (!canCancelReservedOrder(order)) {
             return;
           }
 
@@ -307,8 +498,10 @@ export const mercadoPagoOrderWebhook = async (
            * Atualiza estado do pagamento.
            */
 
+          // Use the normalized status that selected this branch.
+          // Raw provider statuses may differ (e.g. expired -> cancelled).
           switch (
-          providerOrder.status
+          providerOrder.normalizedStatus
           ) {
             case "failed":
               order.paymentStatus =

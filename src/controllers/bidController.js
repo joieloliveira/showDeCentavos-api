@@ -1,3 +1,4 @@
+import { publishAuctionEvent } from "../services/AuctionEventsService.js";
 import mongoose from "mongoose";
 
 import Auction from "../models/Auction.js";
@@ -6,6 +7,10 @@ import User from "../models/User.js";
 import WalletTransaction from "../models/WalletTransaction.js";
 
 export const placeBid = async (req, res) => {
+    // Fail closed: financial bids require an explicit server-side release switch.
+    if (process.env.AUCTION_BIDDING_ENABLED !== "true") {
+        return res.status(503).json({ message: "Lances temporariamente indisponíveis." });
+    }
     try {
         const { id } = req.params;
         const { idempotencyKey } = req.body ?? {};
@@ -177,7 +182,7 @@ export const placeBid = async (req, res) => {
                         },
                     },
                     {
-                        new: true,
+                        returnDocument: "after",
                         session,
                         runValidators: true,
                     }
@@ -225,7 +230,7 @@ export const placeBid = async (req, res) => {
                         },
                     },
                     {
-                        new: true,
+                        returnDocument: "after",
                         session,
                         runValidators: true,
                     }
@@ -284,6 +289,12 @@ export const placeBid = async (req, res) => {
 
             });
 
+            publishAuctionEvent(id, {
+                status: "active",
+                currentPriceCents: bidResult.currentPriceCents,
+                bidCount: bidResult.bidCount,
+                endsAt: bidResult.expiresAt,
+            });
             return res.status(201).json({
                 message: "Lance registrado com sucesso.",
                 ...bidResult,

@@ -47,6 +47,7 @@ export const processApprovedOrder = async ({
         await Order.findOneAndUpdate(
           {
             _id: internalOrderId,
+            paymentStatus: { $nin: ["refunded", "cancelled", "failed"] },
             "payment.processedAt": null,
           },
 

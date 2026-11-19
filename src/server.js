@@ -1,6 +1,9 @@
 import "dotenv/config";
 
-import app from "./app.js";
+import { validateProductionSecrets } from "./config/productionSecurity.js";
+validateProductionSecrets();
+
+const { default: app } = await import("./app.js");
 import conectarMongoDB from "./config/conexao.js";
 import Bid from "./models/Bid.js";
 import {
